@@ -128,7 +128,7 @@ function nextTier(count) {
 }
 
 // ─── UTILS ────────────────────────────────────────────────────────────────────
-const fmt = s => ${Math.floor(s/60)}:${String(s%60).padStart(2,"0")};
+const fmt = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
 const fmtDate = () => new Date().toLocaleDateString("uk-UA");
 const fmtTime = () => new Date().toLocaleTimeString("uk-UA",{hour:"2-digit",minute:"2-digit"});
 
@@ -469,7 +469,7 @@ function InfoCard({ card }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{background:"rgba(255,255,255,.02)",border:`1px solid ${card.color}33`,borderRadius:13,marginBottom:9,overflow:"hidden"}}>
-    <button onClick={() => setOpen(!open)} style={{width:"100%",padding:"12px 15px",background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:11,textAlign:"left"}}>
+      <button onClick={() => setOpen(!open)} style={{width:"100%",padding:"12px 15px",background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:11,textAlign:"left"}}>
         <span style={{fontSize:24,minWidth:32}}>{card.icon}</span>
         <div style={{flex:1}}>
           <div style={{color:"#f0f9ff",fontSize:13}}>{card.title}</div>
@@ -767,7 +767,7 @@ function App() {
               </div>
             ))}
             <div style={{display:"flex",gap:9,marginTop:14}}>
-            <button onClick={() => setPendingPlan(null)} style={{flex:1,padding:11,borderRadius:11,background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.2)",color:"#fca5a5",cursor:"pointer"}}>✕ Скасувати</button>
+              <button onClick={() => setPendingPlan(null)} style={{flex:1,padding:11,borderRadius:11,background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.2)",color:"#fca5a5",cursor:"pointer"}}>✕ Скасувати</button>
               <button onClick={acceptPlan} style={{flex:2,padding:11,borderRadius:11,background:"linear-gradient(135deg,rgba(74,222,128,.18),rgba(14,116,144,.28))",border:"1px solid rgba(74,222,128,.3)",color:"#4ade80",cursor:"pointer"}}>✓ Прийняти зміни</button>
             </div>
           </div>
@@ -817,8 +817,7 @@ function App() {
               {PHASES.find(p=>p.id===phase)?.weeks.map(w => {
                 const isDone=sessions[w]?.completed, isAct=week===w;
                 return (
-                  <button key={w} className="wbtn" onClick={e=>{setWeek(w);triggerSplash(e,phaseObj.color);}} style={{flex:1,height:46,borderRadius:10,background:isAct?"rgba(56,189,248,.14)":isDone?"rgba(74,222,128,.07)":"rgba(255,255,255,.02)",border:isAct?"2px solid #38bdf8":isDone?"1px solid rgba(74,222,128,.3)":"1px solid rgba(255,255,255,.
-                  07)",color:isAct?"#38bdf8":isDone?"#4ade80":"#64748b",fontSize:13,fontWeight:"bold",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1}}>
+                  <button key={w} className="wbtn" onClick={e=>{setWeek(w);triggerSplash(e,phaseObj.color);}} style={{flex:1,height:46,borderRadius:10,background:isAct?"rgba(56,189,248,.14)":isDone?"rgba(74,222,128,.07)":"rgba(255,255,255,.02)",border:isAct?"2px solid #38bdf8":isDone?"1px solid rgba(74,222,128,.3)":"1px solid rgba(255,255,255,.07)",color:isAct?"#38bdf8":isDone?"#4ade80":"#64748b",fontSize:13,fontWeight:"bold",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1}}>
                     <span>{w}</span>{isDone&&<span style={{fontSize:8}}>✓</span>}
                   </button>
                 );
@@ -955,7 +954,8 @@ function App() {
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                   <div style={{fontSize:9,letterSpacing:3,color:"#475569",textTransform:"uppercase"}}>Історія затримок</div>
                   <div style={{display:"flex",gap:4}}>
-                    {["chart","table"].map(v => (<button key={v} onClick={()=>setHistView(v)} style={{padding:"3px 10px",borderRadius:20,border:`1px solid ${histView===v?"rgba(56,189,248,.4)":"rgba(255,255,255,.07)"}`,background:histView===v?"rgba(56,189,248,.12)":"transparent",color:histView===v?"#38bdf8":"#475569",fontSize:9,cursor:"pointer"}}>
+                    {["chart","table"].map(v => (
+                      <button key={v} onClick={()=>setHistView(v)} style={{padding:"3px 10px",borderRadius:20,border:`1px solid ${histView===v?"rgba(56,189,248,.4)":"rgba(255,255,255,.07)"}`,background:histView===v?"rgba(56,189,248,.12)":"transparent",color:histView===v?"#38bdf8":"#475569",fontSize:9,cursor:"pointer"}}>
                         {v==="chart"?"📈 Графік":"📋 Таблиця"}
                       </button>
                     ))}
