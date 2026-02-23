@@ -409,6 +409,17 @@ input:focus,textarea:focus
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
+// --- FIREBASE CONFIG ---
+const FIREBASE_CONFIG = {
+    "apiKey": "AIzaSyBB5vavbOrb5dL890_5dP1IlGtR4O6b4lE",
+    "authDomain": "freediving-tracker-20da0.firebaseapp.com",
+    "databaseURL": "https://freediving-tracker-20da0-default-rtdb.europe-west1.firebasedatabase.app",
+    "projectId": "freediving-tracker-20da0",
+    "storageBucket": "freediving-tracker-20da0.firebasestorage.app",
+    "messagingSenderId": "760148639764",
+    "appId": "1:760148639764:web:a00f911f984d9282a5a701"
+  };
+
 // ─── AUTHENTICATION ──────────────────────────────────────────────────────────
 let auth = null;
 let currentUser = null;
@@ -430,10 +441,22 @@ function initAuth() {
 
 // Google Sign In
 async function signInWithGoogle() {
-  if (!auth) return null;
-  
   try {
+    if (!auth) {
+      // Спробуємо ініціалізувати auth
+      const cfg = getFirebaseCfg();
+      if (cfg) {
+        initFirebase(cfg);
+      }
+      if (!auth) {
+        throw new Error("Firebase Auth не ініціалізований");
+      }
+    }
+    
     const provider = new firebase.auth.GoogleAuthProvider();
+    provider.addScope('profile');
+    provider.addScope('email');
+    
     const result = await auth.signInWithPopup(provider);
     return result.user;
   } catch (error) {
@@ -595,7 +618,7 @@ const vib = p => { try { navigator.vibrate && navigator.vibrate(p); } catch(e) {
 // Firebase + localStorage hybrid with auth
 function getApiKey() {
  return localStorage.getItem("claude_api_key") || ""; }
-function getFirebaseCfg() { try { return JSON.parse(localStorage.getItem("fb_cfg") || "null"); } catch(e) { return null; } }
+function getFirebaseCfg() { return FIREBASE_CONFIG; }
 
 var _fbDb = null;
 
@@ -1301,6 +1324,7 @@ function SettingsModal({ onClose, user }) {
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authInitialized, setAuthInitialized] = useState(false);
   const [user, setUser] = useState(null);
   const [tab, setTab] = useState("plan");
   const [phase, setPhase] = useState(1);
@@ -1335,8 +1359,7 @@ function App() {
   const audioRef = useRef(null);
   const fileRef = useRef(null);
 
-  // Initialize Firebase and auth on
- mount
+  // Initialize Firebase and auth on mount
   useEffect(() => {
     const cfg = getFirebaseCfg();
     if (cfg) {
@@ -1350,7 +1373,6 @@ function App() {
             currentUser = user;
             setUser(user);
             setIsAuthenticated(true);
-            // Update user ID for data storage
             _userId = user.uid;
           } else {
             currentUser = null;
@@ -1358,8 +1380,13 @@ function App() {
             setIsAuthenticated(false);
             _userId = null;
           }
+          setAuthInitialized(true);
         });
+      } else {
+        setAuthInitialized(true);
       }
+    } else {
+      setAuthInitialized(true);
     }
   }, []);
 
@@ -1574,58 +1601,53 @@ audioRef.current, 880, .12, .5);
   }
 
   // Show login modal if not authenticated
-  if (!isAuthenticated) {
+  if (!authInitialized) {
     return (
-      <>
-        {/* Background with blur effect */}
-        <div className="blur-background" style={{
-          background: "linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f4c75 50%, #3282b8 75%, #bbe1fa 100%)",
-          minHeight: "100vh",
-          position: "relative"
-        }}>
-          {/* Water bubbles */}
-          {[...Array(8)].map((_, i) => (
-            <div
-              key={i}
-              className="water-bubble"
-              style={{
-                left: `${10 + i * 12}%`,
-                width: `${8 + (i % 3) * 4}px`,
-                height: `${8 + (i % 3) * 4}px`,
-                animationDelay: `${i * 0.8}s`,
-                animationDuration: `${6
- + i * 0.5}s`
-              }}
-            />
-          ))}
-          
-          {/* Placeholder content */}
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            minHeight: "100vh",
-            padding: "2rem",
-            textAlign: "center"
-          }}>
-            <div>
-              <div style={{fontSize: "4rem", marginBottom: "1rem", opacity: 0.3}}>🤿</div>
-              <h1 style={{fontSize: "2rem", color: "#f0f9ff", marginBottom: "0.5rem", opacity: 0.5}}>
-                Freediving Tracker
-              </h1>
-              <p style={{color: "#94a3b8", fontSize: "1.1rem", opacity: 0.4}}>
-                Ваш персональний тренер фрідайвінгу
-              </p>
-            </div>
-          </div>
+      <div style={{
+        background: "linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f4c75 50%, #3282b8 75%, #bbe1fa 100%)",
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#38bdf8",
+        fontSize: "1.2rem"
+      }}>
+        <div style={{textAlign: "center"}}>
+          <div style={{fontSize: "3rem", marginBottom: "1rem"}}>🤿</div>
+          <div>Ініціалізація...</div>
         </div>
-        
-        {/* Login Modal */}
-        <LoginModal onLogin={handleLogin} />
-      </>
+      </div>
     );
   }
 
+  if (!isAuthenticated) {
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f4c75 50%, #3282b8 75%, #bbe1fa 100%)",
+      minHeight: "100vh",
+      position: "relative"
+    }}>
+      {/* Water bubbles */}
+      {[...Array(8)].map((_, i) => (
+        <div
+          key={i}
+          className="water-bubble"
+          style={{
+            left: `${10 + i * 12}%`,
+            width: `${8 + (i % 3) * 4}px`,
+            height: `${8 + (i % 3) * 4}px`,
+            animationDelay: `${i * 0.8}s`,
+            animationDuration: `${6 + i * 0.5}s`
+          }}
+        />
+      ))}
+      
+      {/* Login Modal */}
+      <LoginModal onLogin={handleLogin} />
+      </div>
+    );
+  }
+          
   // Main app variables
   const plan = getPlan(week);
   const phaseObj = PHASES.find(p => p.weeks.includes(week)) || PHASES[0];
