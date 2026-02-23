@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Freediving Tracker</title>
+
+<!-- React -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+
+<style>
+body{margin:0;background:#050d1a;color:#e2e8f0;font-family:Arial, sans-serif;overflow-x:hidden}
+button{cursor:pointer}
+
+/* Auth overlay */
+#authOverlay{
+position:fixed;inset:0;
+background:rgba(5,13,26,0.85);
+backdrop-filter:blur(8px);
+display:flex;align-items:center;justify-content:center;
+z-index:9999;flex-direction:column;overflow:hidden;
+}
+
+.auth-card{
+background:#0f172a;padding:40px;border-radius:20px;
+box-shadow:0 20px 60px rgba(0,0,0,0.6);
+text-align:center;z-index:2;
+animation:fadeIn 0.6s ease;
+}
+
+@keyframes fadeIn{
+from{opacity:0;transform:translateY(20px)}
+to{opacity:1;transform:translateY(0)}
+}
+
+/* Animated fish */
+.fish{
+position:absolute;width:60px;height:30px;
+background:linear-gradient(90deg,#38bdf8,#0ea5e9);
+border-radius:50px 50px 50px 0;
+animation:swim 12s linear infinite;
+}
+
+.fish:after{
+content:"";
+position:absolute;width:10px;height:10px;
+background:#7dd3fc;border-radius:50%;
+right:-5px;top:10px;
+animation:bubble 3s infinite ease-out;
+}
+
+@keyframes swim{
+0%{transform:translateX(-100px) translateY(0)}
+100%{transform:translateX(120vw) translateY(40px)}
+}
+
+@keyframes bubble{
+0%{opacity:0;transform:translateY(0)}
+50%{opacity:1}
+100%{opacity:0;transform:translateY(-40px)}
+}
+
+.error-toast{
+position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+background:#1e293b;padding:12px 20px;border-radius:12px;
+box-shadow:0 10px 30px rgba(0,0,0,0.5);
+z-index:10000;
+}
+</style>
+</head>
+<body>
+
+<div id="authOverlay">
+  <div class="fish" style="top:20%"></div>
+  <div class="fish" style="top:60%;animation-delay:4s"></div>
+
+  <div class="auth-card">
+    <h2>Увійти в Freediving Tracker</h2>
+    <button id="googleLoginBtn" style="margin-top:20px;padding:12px 24px;border:none;border-radius:12px;background:#1d4ed8;color:white;font-size:16px;">
+      Увійти через Google
+    </button>
+  </div>
+</div>
+
+<div id="root"></div>
+
+<script type="text/babel">
+
+// Firebase config (залиш свій)
+const firebaseConfig = {
+  apiKey: "AIzaSyBB5vavbOrb5dL890_5dP1IlGtR4O6b4lE",
+  authDomain: "freediving-tracker-20da0.firebaseapp.com",
+  databaseURL: "https://freediving-tracker-20da0-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "freediving-tracker-20da0",
+  storageBucket: "freediving-tracker-20da0.firebasestorage.app",
+  messagingSenderId: "760148639764",
+  appId: "1:760148639764:web:a00f911f984d9282a5a701"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+const auth = firebase.auth();
+
+let currentUid = null;
+
+function showError(message){
+  const el = document.createElement("div");
+  el.className="error-toast";
+  el.innerText = message || "Ого, це ти куди натиснув? Можеш повторити? 😅";
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(),4000);
+}
+
+window.onerror = function(){
+  showError();
+};
+
+const provider = new firebase.auth.GoogleAuthProvider();
+
+document.getElementById("googleLoginBtn").onclick = ()=>{
+  auth.signInWithPopup(provider).catch(e=>showError(e.message));
+};
+
+auth.onAuthStateChanged(user=>{
+  if(user){
+    currentUid = user.uid;
+    document.getElementById("authOverlay").style.display="none";
+  }else{
+    document.getElementById("authOverlay").style.display="flex";
+  }
+});
+
+function App(){
+  const [data,setData]=React.useState(null);
+
+  React.useEffect(()=>{
+    if(!currentUid) return;
+    const ref=db.ref("users/"+currentUid+"/data");
+    ref.on("value",snap=>{
+      setData(snap.val());
+    });
+  },[currentUid]);
+
+  const save=()=>{
+    if(!currentUid) return;
+    db.ref("users/"+currentUid+"/data").set({updated:Date.now()});
+  };
+
+  const logout=()=>{
+    auth.signOut();
+  };
+
+  return(
+    <div style={{padding:"20px"}}>
+      <h1>Freediving Tracker</h1>
+      <button onClick={save}>Зберегти тестові дані</button>
+      <button onClick={logout} style={{marginLeft:"10px"}}>Log Out</button>
+      <pre>{JSON.stringify(data,null,2)}</pre>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+
+</script>
+
+</body>
+</html>
