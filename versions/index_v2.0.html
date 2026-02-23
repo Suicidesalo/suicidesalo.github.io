@@ -1,0 +1,1431 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<title>Freediving Tracker — Станіслав</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#050d1a;font-family:Georgia,serif;color:#e2e8f0;overflow-x:hidden}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── FIT PARSER ──────────────────────────────────────────────────────────────
+const FIT_EPOCH = 631065600;
+function parseFitFile(buffer) {
+  try {
+    const b = new Uint8Array(buffer), v = new DataView(buffer);
+    if (b.length < 14) return null;
+    const hSize = b[0];
+    if (String.fromCharCode(b[8],b[9],b[10],b[11]) !== '.FIT') return null;
+    const dataSize = v.getUint32(4, true);
+    const end = Math.min(hSize + dataSize, b.length - 2);
+    let off = hSize, defs = {}, pts = [], maxHR=0, minHR=255, sumHR=0, nHR=0;
+    while (off < end) {
+      if (off >= b.length) break;
+      const h = b[off++];
+      if (h & 0x80) continue;
+      const isDef = !!(h & 0x40), hasDev = !!(h & 0x20), lt = h & 0x0F;
+      if (isDef) {
+        if (off+5 > b.length) break;
+        off++;
+        const le = b[off++] === 0;
+        const mn = le ? v.getUint16(off,true) : v.getUint16(off,false); off+=2;
+        const nf = b[off++];
+        const fields = [];
+        for (let i=0; i<nf && off+3<=b.length; i++) { fields.push({n:b[off],sz:b[off+1]}); off+=3; }
+        if (hasDev && off<b.length) { const nd=b[off++]; off+=nd*3; }
+        defs[lt] = {mn, fields, le};
+      } else {
+        const d = defs[lt]; if (!d) break;
+        const sz = d.fields.reduce((a,f) => a+f.sz, 0);
+        if (off+sz > b.length) break;
+        const msg = {}; let fo = off;
+        for (const f of d.fields) {
+          try {
+            if(f.sz===1) msg[f.n]=b[fo];
+            else if(f.sz===2) msg[f.n]=d.le?v.getUint16(fo,true):v.getUint16(fo,false);
+            else if(f.sz===4) msg[f.n]=d.le?v.getUint32(fo,true):v.getUint32(fo,false);
+          } catch(e) {}
+          fo += f.sz;
+        }
+        off = fo;
+        if (d.mn === 20) {
+          const hr=msg[3], ts=msg[253];
+          if (hr && hr>0 && hr<250 && ts) {
+            pts.push({t:ts+FIT_EPOCH, hr});
+            sumHR+=hr; nHR++;
+            if(hr>maxHR) maxHR=hr;
+            if(hr<minHR) minHR=hr;
+          }
+        }
+      }
+    }
+    if (pts.length>0) { const t0=pts[0].t; pts.forEach(p => p.el=p.t-t0); }
+    return { pts, stats: { avg:nHR?Math.round(sumHR/nHR):0, max:maxHR<250?maxHR:0, min:minHR<250&&minHR>0?minHR:0, dur:pts.length>1?Math.round(pts[pts.length-1].el/60):0, n:nHR }};
+  } catch(e) { return null; }
+}
+
+// ─── DATA ────────────────────────────────────────────────────────────────────
+const PHASES = [
+  {id:1, name:"Фаза 1", subtitle:"Відновлення", color:"#4ade80", rgb:"74,222,128",  weeks:[1,2,3,4]},
+  {id:2, name:"Фаза 2", subtitle:"Розвиток",    color:"#38bdf8", rgb:"56,189,248",  weeks:[5,6,7,8]},
+  {id:3, name:"Фаза 3", subtitle:"Прогрес",     color:"#a78bfa", rgb:"167,139,250", weeks:[9,10,11,12]}
+];
+const BASE_PLANS = {
+  1:{phase:1,goals:{s:"1.5 хв",d:"4×25м DNF",g:"4 спуски"},tip:"Перше заняття після перерви. Ніякого форсування.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м спокійний кроль, розтяжка, діафрагмальне дихання."},{n:"Статика на поверхні",t:"15 хв",d:"4 підходи × 1.5 хв. Відпочинок 3 хв між підходами."},{n:"Динаміка без ласт (DNF)",t:"20 хв",d:"4×25м без ласт. Темп повільний. Відпочинок 4 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски до 3.8м і одразу вгору. Продувка кожні 50см. Відпочинок 3 хв."},{n:"Заминка",t:"5 хв",d:"2×25м спокійне плавання. Дихання на бортику."}]},
+  2:{phase:1,goals:{s:"2 хв",d:"4×25м DNF",g:"4 спуски, 10-15 сек"},tip:"Практикуй Френзель щодня 5 хвилин.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль, розтяжка."},{n:"Статика на поверхні",t:"15 хв",d:"4 підходи × 2 хв. Відпочинок 3 хв."},{n:"Динаміка без ласт (DNF)",t:"20 хв",d:"4×25м без ласт. Відпочинок 4 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски — 10-15 сек на дні. Відпочинок 3 хв."},{n:"Заминка",t:"5 хв",d:"2×25м спокійне плавання."}]},
+  3:{phase:1,goals:{s:"2.5 хв",d:"4×25м або 1×50м DNF",g:"4 спуски, 20-30 сек"},tip:"50м — тільки якщо свіжий і пульс < 90.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль, розтяжка."},{n:"Статика на поверхні",t:"15 хв",d:"4 підходи × 2-2.5 хв. Відпочинок 3 хв."},{n:"Динаміка без ласт (DNF)",t:"20 хв",d:"4×25м. Якщо легко — спробуй 50м. Відпочинок 4 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски, 20-30 сек на дні. Відпочинок 3-4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м спокійне плавання."}]},
+  4:{phase:1,goals:{s:"2.5 хв",d:"5×25м або 2×50м DNF",g:"5 спусків, 30-45 сек"},tip:"Кінець Фази 1!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"4 підходи × 2.5 хв. Відпочинок 3 хв."},{n:"Динаміка без ласт (DNF)",t:"20 хв",d:"5×25м або 2×50м. Відпочинок 4 хв."},{n:"Глибина",t:"10 хв",d:"5 спусків, 30-45 сек + горизонталь. Відпочинок 4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  5:{phase:2,goals:{s:"3 хв",d:"4×50м DYN з ластами",g:"4 спуски, 45-60 сек"},tip:"Перший раз з ластами. Рух від стегна.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3 хв. Відпочинок 3.5 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"4×50м з ластами, пояс 2кг. Відпочинок 5 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски, 45-60 сек + горизонталь. Відпочинок 4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  6:{phase:2,goals:{s:"3 хв",d:"4×50м DYN",g:"4 спуски, 45-60 сек"},tip:"Закріплення тижня 5.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3 хв. Відпочинок 3.5 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"4×50м. Відпочинок 5 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски, 45-60 сек + горизонталь. Відпочинок 4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  7:{phase:2,goals:{s:"3.5 хв",d:"3×75м або 4×50м DYN",g:"4 спуски комбо"},tip:"Перша спроба 75м!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3-3.5 хв. Відпочинок 4 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"3×75м або 4×50м. Відпочинок 5-6 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски: статика 30-45 сек + горизонталь. Відпочинок 4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  8:{phase:2,goals:{s:"3.5 хв",d:"3×75м DYN",g:"4 спуски комбо"},tip:"Кінець Фази 2. Рекорд 75м поруч!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3.5 хв. Відпочинок 4 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"3×75м. Відпочинок 6 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски комбо."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  9:{phase:3,goals:{s:"4 хв",d:"3×75м або 2×100м DYN",g:"4 спуски"},tip:"Фаза 3 — фінальний спринт!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3.5-4 хв. Відпочинок 4 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"3×75м або 2×100м. Відпочинок 6 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски вільний стиль."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  10:{phase:3,goals:{s:"4 хв",d:"2×100м DYN",g:"3 спуски"},tip:"100м легко — ти вже перевершив рекорд!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 4 хв. Відпочинок 4 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"2×100м. Відпочинок 6 хв."},{n:"Глибина",t:"10 хв",d:"3 спуски відновлювальні."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  11:{phase:3,goals:{s:"4+ хв",d:"Спроба рекорду",g:"3 спуски"},tip:"День рекорду! Відпочинь добре.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 4+ хв. Відпочинок 4-5 хв."},{n:"Спроба рекорду дистанції",t:"20 хв",d:"1 спроба рекорду після 5-6 хв відпочинку."},{n:"Глибина",t:"10 хв",d:"3 спуски відновлювальні."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  12:{phase:3,goals:{s:"4+ хв",d:"Новий рекорд",g:"3 спуски"},tip:"Фінал програми! 🎉",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 4+ хв. Відпочинок 4-5 хв."},{n:"Фінальний заплив",t:"20 хв",d:"1 спроба рекорду. Святкуй кожен метр понад 75м!"},{n:"Глибина",t:"10 хв",d:"3 спуски — насолоджуйся."},{n:"Заминка",t:"5 хв",d:"2×25м."}]}
+};
+
+// ─── ACHIEVEMENTS ─────────────────────────────────────────────────────────────
+const ACH_DEFS = [
+  {id:"h45",  icon:"💧", name:"45 секунд",       desc:"≥0:45 затримки. Кожна спроба рахується",      type:"timer", thr:45},
+  {id:"h60",  icon:"⏱",  name:"Хвилина",         desc:"≥1:00 затримки. Кожна спроба рахується",      type:"timer", thr:60},
+  {id:"h90",  icon:"🌊", name:"Хвилина 30",       desc:"≥1:30 затримки. Кожна спроба рахується",      type:"timer", thr:90},
+  {id:"h120", icon:"🫁", name:"Дві хвилини",      desc:"≥2:00 затримки. Кожна спроба рахується",      type:"timer", thr:120},
+  {id:"h180", icon:"💪", name:"Три хвилини",      desc:"≥3:00 затримки. Кожна спроба рахується",      type:"timer", thr:180},
+  {id:"h240", icon:"🔥", name:"Чотири хвилини",   desc:"≥4:00 затримки. Кожна спроба рахується",      type:"timer", thr:240},
+  {id:"h300", icon:"⚡", name:"П'ять хвилин",     desc:"≥5:00 затримки. Кожна спроба рахується",      type:"timer", thr:300},
+  {id:"pb",   icon:"🏅", name:"Рекордсмен",       desc:"Кожен новий особистий рекорд статики",         type:"beat_record"},
+  {id:"sess", icon:"🏊", name:"Тиждень виконано", desc:"Кожне збережене тренування рахується",         type:"session"},
+  {id:"fit",  icon:"📊", name:"Аналітик",         desc:"Кожен завантажений FIT файл рахується",        type:"fit"},
+  {id:"plan", icon:"🤝", name:"Прийняв пораду",   desc:"Кожне прийняте рішення AI рахується",          type:"plan_accept"},
+  {id:"blks", icon:"✅", name:"Повне виконання",  desc:"Всі 5 блоків тижня відмічені як виконані",     type:"all_blocks"},
+  {id:"cons", icon:"📅", name:"Система",          desc:"3+ тижні поспіль завершені",                   type:"streak3"},
+  {id:"elite",icon:"🦈", name:"Еліта",            desc:"Всі 12 тижнів програми завершені",             type:"full_12"},
+];
+function getTiers(count) {
+  const t = [];
+  if (count >= 1)   t.push({e:"🥉", n:"Бронза", from:1});
+  if (count >= 11)  t.push({e:"🥈", n:"Срібло", from:11});
+  if (count >= 51)  t.push({e:"🥇", n:"Золото",  from:51});
+  if (count >= 100) t.push({e:"🏆", n:"Платина", from:100});
+  return t;
+}
+function nextTier(count) {
+  if (count === 0)  return {e:"🥉", need:1};
+  if (count < 11)   return {e:"🥈", need:11-count};
+  if (count < 51)   return {e:"🥇", need:51-count};
+  if (count < 100)  return {e:"🏆", need:100-count};
+  return null;
+}
+
+// ─── UTILS ────────────────────────────────────────────────────────────────────
+const fmt = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+const fmtDate = () => new Date().toLocaleDateString("uk-UA");
+const fmtTime = () => new Date().toLocaleTimeString("uk-UA",{hour:"2-digit",minute:"2-digit"});
+
+function beep(ctx, freq=440, dur=0.15, vol=0.3) {
+  if (!ctx) return;
+  try {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+dur);
+    o.start(); o.stop(ctx.currentTime+dur);
+  } catch(e) {}
+}
+const vib = p => { try { navigator.vibrate && navigator.vibrate(p); } catch(e) {} };
+
+// Firebase + localStorage hybrid
+function getApiKey() { return localStorage.getItem("claude_api_key") || ""; }
+function getFirebaseCfg() { try { return JSON.parse(localStorage.getItem("fb_cfg") || "null"); } catch(e) { return null; } }
+
+var _fbDb = null;
+
+function initFirebase(cfg) {
+  try {
+    if (typeof firebase === "undefined") {
+      console.error("Firebase SDK не завантажений");
+      return false;
+    }
+
+    // якщо вже є app — не створюємо новий
+    var app;
+    if (firebase.apps && firebase.apps.length) {
+      app = firebase.app();
+    } else {
+      app = firebase.initializeApp(cfg);
+    }
+
+    _fbDb = firebase.database(app);
+    return true;
+
+  } catch(e) {
+    console.error("FB init:", e);
+    _fbDb = null;
+    return false;
+  }
+}
+var _userId = localStorage.getItem("fd_user_id");
+if (!_userId) { _userId = "u_" + Math.random().toString(36).slice(2,10); localStorage.setItem("fd_user_id", _userId); }
+
+const store = {
+  async get(key) {
+    if (_fbDb) {
+      try { var s = await _fbDb.ref("users/" + _userId + "/" + key).get(); if (s.exists()) { localStorage.setItem("fd5_" + key, JSON.stringify(s.val())); return s.val(); } } catch(e) {}
+    }
+    try { var v = localStorage.getItem("fd5_" + key); return v ? JSON.parse(v) : null; } catch(e) { return null; }
+  },
+  async set(key, val) {
+    try { localStorage.setItem("fd5_" + key, JSON.stringify(val)); } catch(e) {}
+    if (_fbDb) { try { await _fbDb.ref("users/" + _userId + "/" + key).set(val); } catch(e) {} }
+  },
+  sub(key, cb) {
+    if (!_fbDb) return function(){};
+    var ref = _fbDb.ref("users/" + _userId + "/" + key);
+    ref.on("value", function(s){ if(s.exists()) cb(s.val()); });
+    return function(){ ref.off("value"); };
+  }
+};
+
+// ─── AI ANALYSIS ──────────────────────────────────────────────────────────────
+async function runAIAnalysis(payload) {
+  var apiKey = getApiKey();
+  if (!apiKey) throw new Error("API ключ не налаштований. Відкрий налаштування (⚙️) та введи свій Anthropic API ключ.");
+  const { week, session, fitStats, planBlocks, planGoals, blockNotes, timerRecords, allSessions } = payload;
+  const fitInfo = fitStats
+    ? "\nFIT: avg HR=" + fitStats.avg + ", max HR=" + fitStats.max + ", min HR=" + fitStats.min + ", тривалість=" + fitStats.dur + " хв"
+    : "";
+  const notesInfo = Object.entries(blockNotes)
+    .filter(([k]) => k.startsWith(week + "_n"))
+    .map(([k,v]) => "  Блок " + (parseInt(k.split("_")[1])+1) + ': "' + v + '"')
+    .join("\n");
+  const prevTxt = Object.entries(allSessions)
+    .map(([w,s]) => "Тиждень " + w + ": статика=" + (s.staticTime||"?") + ", HR avg=" + (s.avgHR||"?") + ", самопочуття=" + (s.feeling||"?"))
+    .join("\n");
+  const bestSec = timerRecords.length ? Math.max(...timerRecords.map(r=>r.s)) : 0;
+  const bestStr = bestSec > 0 ? fmt(bestSec) : "немає";
+
+  const promptText = [
+    "Тиждень " + week + " з 12.",
+    "Цілі плану: статика=" + planGoals.s + ", динаміка=" + planGoals.d + ", глибина=" + planGoals.g,
+    "Блоки: " + planBlocks.map((b,i) => (i+1)+". "+b.n).join(", "),
+    "",
+    "Фактичні результати:",
+    "Статика: " + (session.staticTime||"не вказано"),
+    "Динаміка: " + (session.dynamicDist||"не вказано"),
+    "Avg HR: " + (session.avgHR||"не вказано") + ", Max HR: " + (session.maxHR||"не вказано"),
+    "Самопочуття: " + (session.feeling||"не вказано"),
+    "Нотатки: " + (session.notes||"немає"),
+    fitInfo,
+    "",
+    "Нотатки до блоків:",
+    notesInfo || "немає",
+    "",
+    "Рекорд статики таймера: " + bestStr,
+    "",
+    "Попередні тижні:",
+    prevTxt || "перше тренування",
+    "",
+    "ЗАВДАННЯ: Ти — Jan Claude One Damn, особистий AI-тренер Станіслава.",
+    "Проаналізуй: 1) виконання плану 2) HR 3) нотатки 4) загальний прогрес.",
+    "",
+    "Поверни ТІЛЬКИ валідний JSON без жодного тексту навколо:",
+    '{"analysis":"текст 150-250 слів","verdict":"good","suggestions":[{"targetWeek":5,"blockIndex":1,"field":"d","original":"текст","proposed":"текст","reason":"причина"}],"goalSuggestions":[{"targetWeek":5,"field":"s","original":"3 хв","proposed":"2.5 хв","reason":"причина"}]}',
+    "",
+    'verdict може бути: "good", "warning", "critical".',
+    "Якщо план не потребує змін — suggestions та goalSuggestions = порожні масиви [].",
+    "Пропонуй зміни ТІЛЬКИ якщо є реальні проблеми: дуже важко, дуже високий HR, провалено ключові блоки."
+  ].join("\n");
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true" },
+    body: JSON.stringify({
+      model: "claude-opus-4-5",
+      max_tokens: 1000,
+      system: "Ти — Jan Claude One Damn, персональний AI-тренер фрідайвінгу для Станіслава Гойсана (29 р., колишній плавець 1 розряду, рекорд динаміки 75м, пролапс МК 1 ст.). Відповідай ВИКЛЮЧНО українською. Повертай ТІЛЬКИ валідний JSON без будь-якого іншого тексту, без markdown.",
+      messages: [{ role:"user", content: promptText }]
+    })
+  });
+  if (!resp.ok) {
+    var errBody = await resp.text();
+    throw new Error("API " + resp.status + ": " + errBody.slice(0,300));
+  }
+  const data = await resp.json();
+  const raw = (data.content||[]).map(c => c.text||"").join("");
+  const clean = raw.replace(/\x60\x60\x60json|\x60\x60\x60/g,"").trim();
+  return JSON.parse(clean);
+}
+
+// ─── WATER ANIMATIONS ─────────────────────────────────────────────────────────
+function CrownSplash({ active, color, x, y }) {
+  if (!active) return null;
+  return (
+    <div style={{position:"fixed",left:x,top:y,pointerEvents:"none",zIndex:9999,transform:"translate(-50%,-50%)"}}>
+      {[...Array(10)].map((_,i) => {
+        const angle = (i/10)*360;
+        const dist = 28 + (i%2)*10;
+        return (
+          <div key={i} style={{
+            position:"absolute", left:"50%", top:"50%",
+            width:7, height:9,
+            background: color || "#38bdf8",
+            borderRadius:"50% 50% 50% 50% / 40% 40% 60% 60%",
+            transformOrigin:"center bottom",
+            animation:"crownDrop 0.6s cubic-bezier(.2,.8,.4,1) forwards",
+            animationDelay: i*0.01 + "s",
+            "--a": angle + "deg",
+            "--dist": "-" + dist + "px",
+          }}/>
+        );
+      })}
+      {[0,1,2].map(i => (
+        <div key={i} style={{
+          position:"absolute", left:"50%", top:"50%",
+          border: "2px solid " + (color||"#38bdf8"),
+          borderRadius:"50%", transform:"translate(-50%,-50%)",
+          animation:"rippleRing 0.65s ease-out forwards",
+          animationDelay: i*0.13 + "s", opacity:0
+        }}/>
+      ))}
+    </div>
+  );
+}
+
+function DropIntro({ onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 1900); return () => clearTimeout(t); }, []);
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:10000,background:"#050d1a",display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+      <div style={{animation:"dropFall 1s cubic-bezier(.4,0,.6,1) forwards", opacity:0}}>
+        <svg width="48" height="64" viewBox="0 0 48 64">
+          <defs>
+            <linearGradient id="dg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#7dd3fc"/><stop offset="100%" stopColor="#0ea5e9"/>
+            </linearGradient>
+            <radialGradient id="dh" cx="35%" cy="30%">
+              <stop offset="0%" stopColor="white" stopOpacity="0.5"/>
+              <stop offset="100%" stopColor="white" stopOpacity="0"/>
+            </radialGradient>
+          </defs>
+          <path d="M24 2 C24 2 4 28 4 40 C4 52 13 62 24 62 C35 62 44 52 44 40 C44 28 24 2 24 2Z" fill="url(#dg)"/>
+          <ellipse cx="17" cy="28" rx="5" ry="8" fill="url(#dh)"/>
+        </svg>
+      </div>
+      {[0,1,2].map(i => (
+        <div key={i} style={{
+          position:"absolute", left:"50%", top:"50%",
+          border:"3px solid #38bdf8", borderRadius:"50%",
+          transform:"translate(-50%,-50%)",
+          animation:"introRipple 0.8s ease-out forwards",
+          animationDelay: (0.92 + i*0.18) + "s", opacity:0
+        }}/>
+      ))}
+      <div style={{position:"absolute",inset:0,background:"#050d1a",animation:"introDone .5s ease-in 1.5s forwards",opacity:1}}/>
+    </div>
+  );
+}
+
+// ─── CHARTS ───────────────────────────────────────────────────────────────────
+function HRChart({ pts, color }) {
+  if (!pts || pts.length < 2) return null;
+  const c = color || "#38bdf8";
+  const W=320, H=80, pad=28;
+  const maxT = pts[pts.length-1].el || 1;
+  const hrs = pts.map(p => p.hr);
+  const minH = Math.min(...hrs)-5, maxH = Math.max(...hrs)+5;
+  const sx = t => pad + (t/maxT)*(W-pad*2);
+  const sy = h => H-pad - ((h-minH)/(maxH-minH))*(H-pad*1.5);
+  const linePath = pts.map((p,i) => (i===0?"M":"L") + sx(p.el).toFixed(1) + "," + sy(p.hr).toFixed(1)).join(" ");
+  const fillPath = linePath + " L" + sx(maxT).toFixed(1) + "," + (H-4) + " L" + sx(0).toFixed(1) + "," + (H-4) + " Z";
+  const steps = Math.max(1, Math.floor(maxT/60/4));
+  const xTicks = [];
+  for (let m=0; m*60<=maxT; m+=steps) xTicks.push(m);
+  return (
+    <svg width="100%" viewBox={"0 0 " + W + " " + H} style={{display:"block"}}>
+      <defs>
+        <linearGradient id={"hg"+c.replace("#","")} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={c} stopOpacity="0.3"/>
+          <stop offset="100%" stopColor={c} stopOpacity="0.02"/>
+        </linearGradient>
+      </defs>
+      {[80,100,120].map(h => (
+        <g key={h}>
+          <line x1={pad} y1={sy(h)} x2={W-pad} y2={sy(h)} stroke="rgba(255,255,255,.06)" strokeWidth="1"/>
+          <text x={pad-3} y={sy(h)+4} textAnchor="end" fill="#475569" fontSize="8">{h}</text>
+        </g>
+      ))}
+      {minH<=85 && 85<=maxH && (
+        <line x1={pad} y1={sy(85)} x2={W-pad} y2={sy(85)} stroke="#4ade80" strokeWidth="1" strokeDasharray="4,3" opacity="0.5"/>
+      )}
+      {xTicks.map(m => (
+        <text key={m} x={sx(m*60)} y={H-2} textAnchor="middle" fill="#475569" fontSize="8">{m}м</text>
+      ))}
+      <path d={fillPath} fill={"url(#hg"+c.replace("#","")+")"} />
+      <path d={linePath} fill="none" stroke={c} strokeWidth="1.5" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// History line chart for timer records
+function StaticHistoryChart({ records }) {
+  if (!records || records.length < 2) return null;
+  const pts = [...records].reverse(); // chronological
+  const W=320, H=90, padL=36, padB=20, padR=12, padT=8;
+  const vals = pts.map(p => p.s);
+  const minV = Math.max(0, Math.min(...vals) - 10);
+  const maxV = Math.max(...vals) + 10;
+  const sx = i => padL + (i/(pts.length-1))*(W-padL-padR);
+  const sy = v => padT + (1-(v-minV)/(maxV-minV))*(H-padT-padB);
+  const linePath = pts.map((p,i) => (i===0?"M":"L") + sx(i).toFixed(1) + "," + sy(p.s).toFixed(1)).join(" ");
+  const fillPath = linePath + " L" + sx(pts.length-1).toFixed(1) + "," + (H-padB) + " L" + sx(0).toFixed(1) + "," + (H-padB) + " Z";
+  const yTicks = [60,120,180,240,300].filter(v => v>=minV && v<=maxV);
+  return (
+    <svg width="100%" viewBox={"0 0 "+W+" "+H} style={{display:"block"}}>
+      <defs>
+        <linearGradient id="shg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.35"/>
+          <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.02"/>
+        </linearGradient>
+      </defs>
+      {yTicks.map(v => (
+        <g key={v}>
+          <line x1={padL} y1={sy(v)} x2={W-padR} y2={sy(v)} stroke="rgba(255,255,255,.06)" strokeWidth="1"/>
+          <text x={padL-3} y={sy(v)+4} textAnchor="end" fill="#475569" fontSize="8">{fmt(v)}</text>
+        </g>
+      ))}
+      <path d={fillPath} fill="url(#shg)"/>
+      <path d={linePath} fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinejoin="round"/>
+      {pts.map((p,i) => (
+        <circle key={i} cx={sx(i)} cy={sy(p.s)} r={p.rec ? 5 : 3}
+          fill={p.rec ? "#fbbf24" : "#38bdf8"}
+          stroke={p.rec ? "#92400e" : "#0ea5e9"}
+          strokeWidth="1.5"/>
+      ))}
+      {pts.length <= 10 && pts.map((p,i) => (
+        <text key={i} x={sx(i)} y={sy(p.s)-8} textAnchor="middle" fill={p.rec?"#fbbf24":"#94a3b8"} fontSize="8">{fmt(p.s)}</text>
+      ))}
+    </svg>
+  );
+}
+
+// Progress line chart for sessions (static time per week)
+function SessionHistoryChart({ sessions }) {
+  const completed = [...Array(12)].map((_,i) => ({w:i+1, s:sessions[i+1]})).filter(x => x.s?.completed && x.s.staticTime);
+  if (completed.length < 2) return null;
+  const parseTime = str => {
+    if (!str) return 0;
+    const m = str.match(/(\d+)[:\.](\d+)/);
+    return m ? parseInt(m[1])*60+parseInt(m[2]) : 0;
+  };
+  const pts = completed.map(x => ({ w:x.w, s:parseTime(x.s.staticTime), label:x.s.staticTime }));
+  const W=320, H=90, padL=36, padB=20, padR=12, padT=8;
+  const vals = pts.map(p=>p.s).filter(v=>v>0);
+  if (vals.length < 2) return null;
+  const minV = Math.max(0, Math.min(...vals)-15), maxV = Math.max(...vals)+15;
+  const sx = i => padL + (i/(pts.length-1))*(W-padL-padR);
+  const sy = v => padT + (1-(v-minV)/(maxV-minV))*(H-padT-padB);
+  const validPts = pts.filter(p=>p.s>0);
+  const linePath = validPts.map((p,i) => (i===0?"M":"L") + sx(i).toFixed(1) + "," + sy(p.s).toFixed(1)).join(" ");
+  const fillPath = linePath + " L" + sx(validPts.length-1).toFixed(1) + "," + (H-padB) + " L" + sx(0).toFixed(1) + "," + (H-padB) + " Z";
+  return (
+    <svg width="100%" viewBox={"0 0 "+W+" "+H} style={{display:"block"}}>
+      <defs>
+        <linearGradient id="seg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#4ade80" stopOpacity="0.3"/>
+          <stop offset="100%" stopColor="#4ade80" stopOpacity="0.02"/>
+        </linearGradient>
+      </defs>
+      <path d={fillPath} fill="url(#seg)"/>
+      <path d={linePath} fill="none" stroke="#4ade80" strokeWidth="2" strokeLinejoin="round"/>
+      {validPts.map((p,i) => (
+        <g key={i}>
+          <circle cx={sx(i)} cy={sy(p.s)} r="3.5" fill="#4ade80" stroke="#166534" strokeWidth="1.5"/>
+          <text x={sx(i)} y={H-padB+12} textAnchor="middle" fill="#475569" fontSize="8">T{p.w}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+// ─── ACHIEVEMENT BADGE ────────────────────────────────────────────────────────
+function AchBadge({ def, count }) {
+  const tiers = getTiers(count);
+  const next = nextTier(count);
+  const earned = count > 0;
+  const [showTip, setShowTip] = useState(false);
+  return (
+    <div
+      onClick={() => setShowTip(!showTip)}
+      style={{
+        background: earned?"rgba(251,191,36,.06)":"rgba(255,255,255,.02)",
+        border: earned?"1px solid rgba(251,191,36,.25)":"1px solid rgba(255,255,255,.05)",
+        borderRadius:12, padding:"9px 6px", textAlign:"center",
+        filter: earned?"none":"grayscale(1) opacity(.3)",
+        transition:"all .3s", cursor:"pointer", position:"relative"
+      }}
+    >
+      <div style={{fontSize:22, marginBottom:2}}>{def.icon}</div>
+      <div style={{fontSize:9, color:earned?"#fbbf24":"#475569", lineHeight:1.3, marginBottom:3}}>{def.name}</div>
+      {earned ? (
+        <>
+          <div style={{display:"flex",justifyContent:"center",gap:1,marginBottom:2}}>
+            {tiers.map(t => <span key={t.e} style={{fontSize:10}}>{t.e}</span>)}
+          </div>
+          <div style={{fontSize:8,color:"#64748b"}}>×{count}</div>
+          {next && <div style={{fontSize:7,color:"#475569",marginTop:1}}>+{next.need}→{next.e}</div>}
+        </>
+      ) : (
+        <div style={{fontSize:7,color:"#334155"}}>🔒</div>
+      )}
+      {showTip && (
+        <div style={{
+          position:"absolute", bottom:"calc(100% + 6px)", left:"50%", transform:"translateX(-50%)",
+          background:"rgba(8,18,36,.98)", border:"1px solid rgba(56,189,248,.3)",
+          borderRadius:9, padding:"8px 10px", zIndex:100, minWidth:160, textAlign:"left",
+          boxShadow:"0 4px 20px rgba(0,0,0,.6)"
+        }}>
+          <div style={{fontSize:11,color:"#f0f9ff",marginBottom:4}}>{def.name}</div>
+          <div style={{fontSize:10,color:"#64748b",lineHeight:1.5}}>{def.desc}</div>
+          {earned && (
+            <div style={{marginTop:6,display:"flex",gap:4,flexWrap:"wrap"}}>
+              {[{e:"🥉",n:"1+",active:count>=1},{e:"🥈",n:"11+",active:count>=11},{e:"🥇",n:"51+",active:count>=51},{e:"🏆",n:"100+",active:count>=100}].map(t => (
+                <div key={t.e} style={{fontSize:9,color:t.active?"#fbbf24":"#334155",opacity:t.active?1:0.4}}>{t.e} {t.n}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── INFO CARD ────────────────────────────────────────────────────────────────
+const INFO_DATA = [
+  {icon:"🫁",title:"Діафрагмальне дихання",color:"#38bdf8",steps:["Рука на живіт, інша на груди","Вдих — ЖИВІТ вперед, груди нерухомі","Видих через стиснуті губи — живіт назад","Ритм: 4 сек вдих → 2 сек пауза → 6-8 сек видих"],note:"💡 5-10 хв щодня — за тиждень стане рефлексом"},
+  {icon:"👂",title:"Техніка Френзеля",color:"#a78bfa",steps:["Знайди голосову щілину — звук «кх»","Закрий горло, рухай КОРЕНЕМ язика вгору-вниз","Закрий ніс + горло + рухни коренем язика вгору","Результат: вуха клацають без зусилля"],note:"⚠️ Продувай кожні 50см до появи болю"},
+  {icon:"🧘",title:"Розслаблення перед пірнанням",color:"#4ade80",steps:["5 хв лежиш на воді обличчям вниз","Думай про нейтральне — не про рекорди","Відчуй як тіло опускається при видиху","Заходь у воду тільки при пульсі < 85"],note:"💡 Нирятельний рефлекс: пульс -10-25% при зануренні обличчя"},
+  {icon:"💨",title:"Триступеневий вдих",color:"#fbbf24",steps:["Живіт: діафрагма вниз","Груди: ребра в сторони","Ключиці: підіймаєш верх","Видих зворотньо: верх → середина → живіт"],note:"🚫 НЕ роби гіпервентиляцію — це смертельно небезпечно"},
+  {icon:"🌀",title:"Рефлекс нирця (MDR)",color:"#f87171",steps:["Обличчя у воду → пульс -10-25%","Кисень до серця і мозку","Периферійні судини звужуються","Тренується холодною водою"],note:"💡 Тому фрідайвери тримають дихання довше у воді"},
+  {icon:"⚡",title:"Безпека: ознаки гіпоксії",color:"#ef4444",steps:["🚩 Тунельний зір — ОДРАЗУ вгору","🚩 Непереборний потяг видихнути + скорочення діафрагми","🚩 Ейфорія або легкість — небезпечний знак","🚩 Blackout без попередження — ЗАВЖДИ buddy"],note:"🆘 Жоден рекорд не вартий ризику"},
+];
+function InfoCard({ card }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{background:"rgba(255,255,255,.02)",border:`1px solid ${card.color}33`,borderRadius:13,marginBottom:9,overflow:"hidden"}}>
+      <button onClick={() => setOpen(!open)} style={{width:"100%",padding:"12px 15px",background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:11,textAlign:"left"}}>
+        <span style={{fontSize:24,minWidth:32}}>{card.icon}</span>
+        <div style={{flex:1}}>
+          <div style={{color:"#f0f9ff",fontSize:13}}>{card.title}</div>
+          <div style={{color:"#475569",fontSize:9,marginTop:1}}>{open?"Згорнути":"Розгорнути"}</div>
+        </div>
+        <span style={{color:card.color,transition:"transform .2s",display:"block",transform:open?"rotate(180deg)":"none"}}>▾</span>
+      </button>
+      {open && (
+        <div style={{padding:"0 15px 13px",animation:"fadeUp .2s ease"}}>
+          {card.steps.map((s,i) => (
+            <div key={i} style={{display:"flex",gap:8,alignItems:"flex-start",marginBottom:6}}>
+              <div style={{minWidth:18,height:18,borderRadius:"50%",background:`${card.color}22`,border:`1px solid ${card.color}55`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:card.color,flexShrink:0}}>{i+1}</div>
+              <div style={{fontSize:12,color:"#cbd5e1",lineHeight:1.5,paddingTop:1}}>{s}</div>
+            </div>
+          ))}
+          <div style={{background:`${card.color}11`,border:`1px solid ${card.color}33`,borderRadius:8,padding:"8px 10px",fontSize:11,color:"#94a3b8",marginTop:3}}>{card.note}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+
+// ─── SETTINGS MODAL ──────────────────────────────────────────────────────────
+function SettingsModal({ onClose, onFirebaseReady }) {
+  const [apiKey, setApiKey]   = useState(getApiKey());
+  const [fbCfg,  setFbCfg]   = useState(localStorage.getItem("fb_cfg") || "");
+  const [fbStatus, setFbStatus] = useState("");
+  const [saved,  setSaved]   = useState(false);
+  const [step,   setStep]    = useState(getFirebaseCfg() ? 5 : 0);
+  const hasFb = !!getFirebaseCfg();
+
+  const STEPS = [
+    {
+      icon:"🔑", color:"#38bdf8",
+      title:"Крок 1 \u2014 Google акаунт",
+      body:"Потрібен безкоштовний Google акаунт. Якщо вже є \u2014 натисни Далі.",
+      action:{label:"Створити Google акаунт", url:"https://accounts.google.com/signup"},
+      hint:"Firebase \u2014 безкоштовний сервіс Google. Акаунт потрібен для входу."
+    },
+    {
+      icon:"🔥", color:"#fb923c",
+      title:"Крок 2 \u2014 Firebase Console",
+      body:"Відкрий Firebase Console і увійди своїм Google акаунтом.",
+      action:{label:"Відкрити console.firebase.google.com", url:"https://console.firebase.google.com"},
+      hint:"Безкоштовний план Spark включає 1 ГБ бази даних і 10 ГБ трафіку \u2014 вистачить на роки."
+    },
+    {
+      icon:"📁", color:"#fbbf24",
+      title:"Крок 3 \u2014 Створи проект",
+      body:"В Firebase Console натисни «Add project».",
+      steps2:["Введи назву: freediving-tracker","Google Analytics \u2014 вимкни (не потрібно)","Натисни «Create project»","Зачекай ~30 секунд"],
+      hint:"Проект \u2014 це хмарний контейнер для твоїх даних тренувань."
+    },
+    {
+      icon:"🗄️", color:"#a78bfa",
+      title:"Крок 4 \u2014 Realtime Database",
+      body:"В лівому меню Firebase: Build → Realtime Database → Create database",
+      steps2:["Вибери регіон europe-west1","Обов'язково вибери «Start in test mode»","Натисни «Enable»"],
+      hint:"Test mode дозволяє зберігати дані без налаштування авторизації."
+    },
+    {
+      icon:"⚙️", color:"#4ade80",
+      title:"Крок 5 \u2014 Отримай конфіг",
+      body:"Отримай firebaseConfig для вставки в застосунок:",
+      steps2:["Натисни шестерню ⚙️ біля «Project Overview» → «Project settings»","Прокрути до розділу «Your apps»","Натисни іконку </> (Web app)","Введи назву: freediving → «Register app»","Скопіюй весь об'єкт firebaseConfig (від { до })"],
+      hint:'Конфіг виглядає так: { "apiKey": "AIza...", "databaseURL": "https://xxx-rtdb.firebaseio.com", ... }'
+    },
+    {
+      icon:"✅", color:"#4ade80",
+      title:"Крок 6 \u2014 Встав конфіг",
+      body:"Встав скопійований firebaseConfig у поле нижче у форматі JSON.",
+      hint:"Після збереження дані одразу синхронізуватимуться між усіма твоїми пристроями!"
+    }
+  ];
+
+  const save = () => {
+    localStorage.setItem("claude_api_key", apiKey.trim());
+    if (fbCfg.trim()) {
+      try {
+        const cfg = JSON.parse(fbCfg.trim());
+        if (!cfg.databaseURL) {
+          setFbStatus("Помилка: у конфігу відсутній databaseURL. Переконайся що Realtime Database створена (не Firestore).");
+          return;
+        }
+        const ok = initFirebase(cfg);
+        localStorage.setItem("fb_cfg", fbCfg.trim());
+        setFbStatus(ok ? "ok" : "err");
+        if (ok && onFirebaseReady) onFirebaseReady();
+      } catch(e) {
+        setFbStatus("Невалідний JSON: " + e.message);
+        return;
+      }
+    } else {
+      setFbStatus("local");
+    }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  const s = STEPS[step];
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,.95)",backdropFilter:"blur(12px)",display:"flex",alignItems:"center",justifyContent:"center",padding:14,overflowY:"auto"}}>
+      <div style={{background:"#080f1e",border:"1px solid rgba(56,189,248,.22)",borderRadius:20,padding:20,maxWidth:440,width:"100%",animation:"pop .3s ease"}}>
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <div style={{fontSize:9,letterSpacing:3,color:"#38bdf8",textTransform:"uppercase"}}>Налаштування</div>
+            <div style={{fontSize:14,color:"#f0f9ff",marginTop:2}}>Firebase + AI підключення</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#475569",fontSize:19,cursor:"pointer"}}>&#x2715;</button>
+        </div>
+
+        <div style={{display:"flex",gap:5,marginBottom:16,padding:"9px 12px",background:"rgba(255,255,255,.03)",borderRadius:10}}>
+          {[{icon:getApiKey()?"🟢":"🔴",label:"AI ключ"},{icon:hasFb?"🟢":"🔴",label:"Firebase"},{icon:hasFb?"🔄":"💾",label:hasFb?"Хмара":"Локально"}].map((x,i)=>(
+            <div key={i} style={{flex:1,textAlign:"center"}}>
+              <div style={{fontSize:15}}>{x.icon}</div>
+              <div style={{fontSize:8,color:"#475569",marginTop:1}}>{x.label}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{marginBottom:16,background:"rgba(56,189,248,.04)",border:"1px solid rgba(56,189,248,.14)",borderRadius:11,padding:13}}>
+          <div style={{fontSize:11,color:"#38bdf8",marginBottom:7}}>🤖 Anthropic API ключ — для AI аналізу тренувань</div>
+          <input type="password" placeholder="sk-ant-api03-..." value={apiKey} onChange={e=>setApiKey(e.target.value)} style={{marginBottom:6}}/>
+          <div style={{fontSize:9,color:"#475569",lineHeight:1.6}}>
+            1. Відкрий <span style={{color:"#38bdf8",cursor:"pointer",textDecoration:"underline"}} onClick={()=>window.open("https://console.anthropic.com","_blank")}>console.anthropic.com</span>
+            {" → API Keys → Create Key → скопіюй → встав сюди."}
+          </div>
+        </div>
+
+        <div style={{background:"rgba(251,146,60,.04)",border:"1px solid rgba(251,146,60,.16)",borderRadius:11,padding:13,marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:11}}>
+            <div style={{fontSize:11,color:"#fb923c"}}>🔥 Firebase — хмарна синхронізація</div>
+            {hasFb&&<div style={{fontSize:8,color:"#4ade80",background:"rgba(74,222,128,.1)",padding:"2px 7px",borderRadius:20}}>Підключено ✓</div>}
+          </div>
+
+          <div style={{display:"flex",gap:3,marginBottom:13}}>
+            {STEPS.map((_,i)=>(
+              <div key={i} onClick={()=>setStep(i)} style={{flex:1,height:3,borderRadius:2,background:i<=step?"rgba(251,146,60,.75)":"rgba(255,255,255,.08)",cursor:"pointer",transition:"all .2s"}}/>
+            ))}
+          </div>
+
+          <div style={{background:"rgba(0,0,0,.25)",borderRadius:10,padding:11,marginBottom:10}}>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:7}}>
+              <span style={{fontSize:19}}>{s.icon}</span>
+              <div style={{fontSize:12,color:"#f0f9ff"}}>{s.title}</div>
+            </div>
+            <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.6,marginBottom:s.steps2?7:0}}>{s.body}</div>
+            {s.steps2&&(
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {s.steps2.map((txt,i)=>(
+                  <div key={i} style={{display:"flex",gap:7,alignItems:"flex-start"}}>
+                    <div style={{minWidth:17,height:17,borderRadius:"50%",background:"rgba(251,146,60,.18)",border:"1px solid rgba(251,146,60,.38)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"#fb923c",flexShrink:0,marginTop:1}}>{i+1}</div>
+                    <div style={{fontSize:11,color:"#cbd5e1",lineHeight:1.5}}>{txt}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {s.action&&(
+              <button onClick={()=>window.open(s.action.url,"_blank")} style={{marginTop:9,width:"100%",padding:"7px",borderRadius:8,background:"rgba(251,146,60,.1)",border:"1px solid rgba(251,146,60,.28)",color:"#fb923c",fontSize:11,cursor:"pointer"}}>
+                {"↗ "+s.action.label}
+              </button>
+            )}
+            <div style={{marginTop:7,fontSize:9,color:"#475569",fontStyle:"italic",lineHeight:1.5}}>{"💡 "+s.hint}</div>
+          </div>
+
+          <div style={{display:"flex",gap:7,marginBottom:step===5?11:0}}>
+            {step>0&&<button onClick={()=>setStep(step-1)} style={{flex:1,padding:"7px",borderRadius:8,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",color:"#64748b",fontSize:11,cursor:"pointer"}}>{"\u2190 Назад"}</button>}
+            {step<5&&<button onClick={()=>setStep(step+1)} style={{flex:2,padding:"7px",borderRadius:8,background:"rgba(251,146,60,.1)",border:"1px solid rgba(251,146,60,.28)",color:"#fb923c",fontSize:11,cursor:"pointer"}}>{"Далі \u2192"}</button>}
+          </div>
+
+          {step===5&&(
+            <div>
+              <textarea
+                rows={6}
+                placeholder={"Встав сюди об'єкт firebaseConfig:\n{\n  \"apiKey\": \"AIza...\",\n  \"authDomain\": \"xxx.firebaseapp.com\",\n  \"databaseURL\": \"https://xxx-default-rtdb.firebaseio.com\",\n  \"projectId\": \"xxx\",\n  \"storageBucket\": \"xxx.appspot.com\",\n  \"messagingSenderId\": \"000\",\n  \"appId\": \"1:000:web:000\"\n}"}
+                value={fbCfg}
+                onChange={e=>setFbCfg(e.target.value)}
+                style={{resize:"vertical",fontFamily:"monospace",fontSize:10,marginBottom:8,minHeight:130}}
+              />
+              {fbStatus==="ok"&&<div style={{padding:"8px 10px",borderRadius:8,background:"rgba(74,222,128,.08)",border:"1px solid rgba(74,222,128,.22)",fontSize:11,color:"#4ade80",marginBottom:8}}>{"🎉 Firebase підключено! Дані синхронізуються між усіма пристроями."}</div>}
+              {fbStatus==="local"&&<div style={{padding:"8px 10px",borderRadius:8,background:"rgba(251,191,36,.07)",border:"1px solid rgba(251,191,36,.2)",fontSize:11,color:"#fbbf24",marginBottom:8}}>{"💾 Firebase не вказано — дані зберігаються лише локально."}</div>}
+              {fbStatus&&fbStatus!=="ok"&&fbStatus!=="local"&&fbStatus!=="err"&&<div style={{padding:"8px 10px",borderRadius:8,background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.2)",fontSize:11,color:"#f87171",marginBottom:8}}>{fbStatus}</div>}
+              {fbStatus==="err"&&<div style={{padding:"8px 10px",borderRadius:8,background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.2)",fontSize:11,color:"#f87171",marginBottom:8}}>{"Помилка ініціалізації Firebase. Перевір конфіг."}</div>}
+            </div>
+          )}
+        </div>
+
+        <div style={{marginBottom:14,background:"rgba(255,255,255,.03)",borderRadius:10,padding:"9px 12px"}}>
+          <div style={{fontSize:9,color:"#475569",marginBottom:3}}>Твій User ID (для переносу даних між пристроями):</div>
+          <div style={{fontFamily:"monospace",fontSize:10,color:"#38bdf8",wordBreak:"break-all"}}>{store._userId}</div>
+          <div style={{fontSize:9,color:"#334155",marginTop:2,lineHeight:1.5}}>DevTools (F12) → Application → Local Storage → додай fd_user_id з цим значенням на новому пристрої.</div>
+        </div>
+
+        <button onClick={save} style={{width:"100%",padding:12,borderRadius:11,background:saved?"rgba(74,222,128,.14)":"linear-gradient(135deg,rgba(14,116,144,.42),rgba(30,58,138,.42))",border:"1px solid "+(saved?"rgba(74,222,128,.38)":"rgba(56,189,248,.33)"),color:saved?"#4ade80":"#38bdf8",fontSize:14,cursor:"pointer",transition:"all .3s"}}>
+          {saved?"✓ Збережено!":"Зберегти налаштування"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+function App() {
+  const [tab, setTab]             = useState("plan");
+  const [phase, setPhase]         = useState(1);
+  const [week, setWeek]           = useState(1);
+  const [sessions, setSessions]   = useState({});
+  const [checks, setChecks]       = useState({});
+  const [bNotes, setBNotes]       = useState({});
+  const [fitData, setFitData]     = useState({});
+  const [aiCache, setAiCache]     = useState({});
+  const [planAdj, setPlanAdj]     = useState({});
+  const [achCounts, setAchCounts] = useState({});
+  const [editW, setEditW]         = useState(null);
+  const [fitLoading, setFitLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError]     = useState(null);
+  const [pendingPlan, setPendingPlan] = useState(null);
+  const [records, setRecords]     = useState([]);
+  const [newRec, setNewRec]       = useState(null);
+  const [newAchQ, setNewAchQ]     = useState([]);
+  const [running, setRunning]     = useState(false);
+  const [secs, setSecs]           = useState(0);
+  const [splash, setSplash]       = useState({active:false,x:0,y:0,color:"#38bdf8"});
+  const [showIntro, setShowIntro] = useState(true);
+  const [loaded, setLoaded]       = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [fbReady, setFbReady]     = useState(false);
+  const [histView, setHistView]   = useState("table"); // "table" | "chart" for Статика
+  const timerRef  = useRef(null);
+  const startRef  = useRef(null);
+  const audioRef  = useRef(null);
+  const fileRef   = useRef(null);
+
+  // Init Firebase on mount
+  useEffect(() => {
+    var cfg = getFirebaseCfg();
+    if (cfg) { var ok = initFirebase(cfg); if(ok) setFbReady(ok); }
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const s  = await store.get("fd5_sessions"); if(s) setSessions(s);
+      const c  = await store.get("fd5_checks");   if(c) setChecks(c);
+      const bn = await store.get("fd5_bnotes");   if(bn) setBNotes(bn);
+      const r  = await store.get("fd5_records");  if(r) setRecords(r);
+      const f  = await store.get("fd5_fit");      if(f) setFitData(f);
+      const ai = await store.get("fd5_ai");       if(ai) setAiCache(ai);
+      const pa = await store.get("fd5_padj");     if(pa) setPlanAdj(pa);
+      const ac = await store.get("fd5_ach");      if(ac) setAchCounts(ac);
+      setLoaded(true);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (running) {
+      startRef.current = Date.now() - secs*1000;
+      timerRef.current = setInterval(() => setSecs(Math.floor((Date.now()-startRef.current)/1000)), 100);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [running]);
+
+  const grantAch = useCallback(async (id) => {
+    setAchCounts(prev => {
+      const prevC = prev[id] || 0;
+      const newC = prevC + 1;
+      const updated = {...prev, [id]: newC};
+      store.set("fd5_ach", updated);
+      const prevTiers = getTiers(prevC).length;
+      const newTiers  = getTiers(newC).length;
+      if (newTiers > prevTiers) {
+        const def = ACH_DEFS.find(a => a.id===id);
+        if (def) {
+          setNewAchQ(q => [...q, {...def, earnedCount: newC}]);
+          setTimeout(() => setNewAchQ(q => q.slice(1)), 4000);
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  const triggerSplash = (e, color) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = r.left + r.width/2, y = r.top + r.height/2;
+    setSplash({active:false, x, y, color: color||"#38bdf8"});
+    setTimeout(() => setSplash({active:true, x, y, color: color||"#38bdf8"}), 10);
+    setTimeout(() => setSplash(s => ({...s, active:false})), 700);
+  };
+
+  const initAudio = () => {
+    if (!audioRef.current) try { audioRef.current = new (window.AudioContext||window.webkitAudioContext)(); } catch(e) {}
+    if (audioRef.current?.state === "suspended") audioRef.current.resume();
+  };
+
+  const startTimer = e => {
+    initAudio(); triggerSplash(e, "#38bdf8");
+    vib([80,40,80]); beep(audioRef.current, 880, .12, .5);
+    setNewRec(null); setRunning(true);
+  };
+
+  const stopTimer = async () => {
+    setRunning(false); vib([150]);
+    beep(audioRef.current, 440, .18, .4);
+    setTimeout(() => beep(audioRef.current, 330, .25, .3), 200);
+    if (secs < 3) { setSecs(0); return; }
+    const best = records.length ? Math.max(...records.map(r=>r.s)) : 0;
+    const isRec = secs > best;
+    const rec = { s:secs, date:fmtDate(), time:fmtTime(), rec:isRec };
+    const upd = [rec, ...records];
+    setRecords(upd); await store.set("fd5_records", upd);
+    if (isRec) {
+      setNewRec(rec); vib([80,40,80,40,250]);
+      beep(audioRef.current,660,.12,.4);
+      setTimeout(()=>beep(audioRef.current,880,.12,.4),160);
+      setTimeout(()=>beep(audioRef.current,1100,.25,.4),320);
+      await grantAch("pb");
+    }
+    for (const a of ACH_DEFS.filter(a=>a.type==="timer")) {
+      if (secs >= a.thr) await grantAch(a.id);
+    }
+    setSecs(0);
+  };
+
+  const handleFitUpload = async (file, weekNum) => {
+    if (!file) return;
+    setFitLoading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = parseFitFile(buf);
+      if (!parsed) { alert("Не вдалося розпарсити FIT файл."); setFitLoading(false); return; }
+      const updated = {...fitData, [weekNum]: parsed};
+      setFitData(updated); await store.set("fd5_fit", updated);
+      await grantAch("fit");
+    } catch(e) { alert("Помилка читання файлу."); }
+    setFitLoading(false);
+  };
+
+  const runAnalysis = async weekNum => {
+    setAiLoading(true); setAiError(null);
+    try {
+      const plan = getPlan(weekNum);
+      const result = await runAIAnalysis({
+        week: weekNum,
+        session: sessions[weekNum] || {},
+        fitStats: fitData[weekNum]?.stats || null,
+        planBlocks: plan.blocks,
+        planGoals: plan.goals,
+        blockNotes: bNotes,
+        timerRecords: records,
+        allSessions: sessions
+      });
+      const updated = {...aiCache, [weekNum]: result};
+      setAiCache(updated); await store.set("fd5_ai", updated);
+      if (result.suggestions?.length || result.goalSuggestions?.length) {
+        setPendingPlan({week: weekNum, ...result});
+      }
+    } catch(e) { setAiError("Помилка AI: " + e.message); }
+    setAiLoading(false);
+  };
+
+  const acceptPlan = async () => {
+    if (!pendingPlan) return;
+    const { week:w, suggestions=[], goalSuggestions=[] } = pendingPlan;
+    const base = getPlan(w);
+    const newBlocks = base.blocks.map(b => ({...b}));
+    const newGoals  = {...base.goals};
+    suggestions.forEach(s => { if (s.blockIndex>=0 && s.blockIndex<newBlocks.length) newBlocks[s.blockIndex][s.field] = s.proposed; });
+    goalSuggestions.forEach(s => { newGoals[s.field] = s.proposed; });
+    const updated = {...planAdj, [w]:{blocks:newBlocks, goals:newGoals}};
+    setPlanAdj(updated); await store.set("fd5_padj", updated);
+    setPendingPlan(null); await grantAch("plan");
+  };
+
+  const saveSession = async (w, data) => {
+    const u = {...sessions, [w]: data}; setSessions(u); await store.set("fd5_sessions", u);
+    setEditW(null); await grantAch("sess");
+    const plan = getPlan(w);
+    const allDone = plan.blocks.every((_,i) => checks[w+"_"+i]);
+    if (allDone) await grantAch("blks");
+    let streak = 0;
+    for (let i=w; i>=1; i--) { if (u[i]?.completed) streak++; else break; }
+    if (streak >= 3) await grantAch("cons");
+    if (Object.values(u).filter(s=>s?.completed).length === 12) await grantAch("elite");
+  };
+
+  const toggleCheck = async k => {
+    const u = {...checks, [k]: !checks[k]}; setChecks(u); await store.set("fd5_checks", u);
+  };
+  const updateBNote = async (k,v) => {
+    const u = {...bNotes, [k]: v}; setBNotes(u); await store.set("fd5_bnotes", u);
+  };
+
+  const getPlan = w => {
+    const adj = planAdj[w];
+    if (!adj) return BASE_PLANS[w] || BASE_PLANS[1];
+    return {...BASE_PLANS[w], ...adj};
+  };
+
+  const plan      = getPlan(week);
+  const phaseObj  = PHASES.find(p => p.weeks.includes(week)) || PHASES[0];
+  const best      = records.length ? Math.max(...records.map(r=>r.s)) : 0;
+  const doneCount = Object.values(sessions).filter(s=>s?.completed).length;
+  const TABS = [
+    {id:"plan",     e:"📋", l:"План"},
+    {id:"staticka", e:"⏱",  l:"Статика"},
+    {id:"progress", e:"📈", l:"Прогрес"},
+    {id:"info",     e:"💡", l:"Знання"},
+    {id:"rules",    e:"📌", l:"Правила"},
+  ];
+
+  if (!loaded) return (
+    <div style={{background:"#050d1a",minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"#38bdf8",fontFamily:"monospace",fontSize:18}}>
+      Завантаження...
+    </div>
+  );
+
+  return (
+    <div style={{background:"#050d1a",minHeight:"100vh",fontFamily:"Georgia,serif",color:"#e2e8f0",overflow:"hidden",position:"relative"}}>
+      <style>{`
+        @keyframes crownDrop{0%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(0);opacity:1}60%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(var(--dist))}100%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(calc(var(--dist) + 10px)) scale(.3);opacity:0}}
+        @keyframes rippleRing{0%{width:0;height:0;opacity:.8}100%{width:90px;height:28px;opacity:0}}
+        @keyframes dropFall{0%{transform:translateY(-200px) scaleX(.85);opacity:0}20%{opacity:1}70%{transform:translateY(0) scaleX(.9)}82%{transform:translateY(10px) scaleX(1.35) scaleY(.18);opacity:.8}100%{transform:translateY(10px) scaleX(1.6) scaleY(0);opacity:0}}
+        @keyframes introRipple{0%{width:4px;height:4px;opacity:.9}100%{width:150px;height:46px;opacity:0}}
+        @keyframes introDone{0%{opacity:1}100%{opacity:0;pointer-events:none}}
+        @keyframes rise{0%{transform:translateY(0);opacity:.5}100%{transform:translateY(-110vh);opacity:0}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(56,189,248,.4)}50%{box-shadow:0 0 0 16px rgba(56,189,248,0)}}
+        @keyframes pulseRed{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}50%{box-shadow:0 0 0 14px rgba(239,68,68,0)}}
+        @keyframes glow{0%,100%{text-shadow:0 0 20px rgba(56,189,248,.3)}50%{text-shadow:0 0 40px rgba(56,189,248,.9)}}
+        @keyframes achIn{0%{transform:translateX(110%);opacity:0}12%{transform:translateX(0);opacity:1}88%{transform:translateX(0);opacity:1}100%{transform:translateX(110%);opacity:0}}
+        @keyframes pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.06)}100%{transform:scale(1);opacity:1}}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        input,textarea{background:rgba(255,255,255,.05);border:1px solid rgba(56,189,248,.2);color:#e2e8f0;border-radius:8px;padding:8px 12px;width:100%;font-family:Georgia,serif;font-size:14px}
+        input:focus,textarea:focus{outline:none;border-color:rgba(56,189,248,.5)}
+        .wbtn{transition:all .18s;cursor:pointer}.wbtn:hover{transform:scale(1.04)}
+        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:rgba(56,189,248,.3);border-radius:4px}
+      `}</style>
+
+      {showIntro && <DropIntro onDone={() => setShowIntro(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)}/>}
+      <CrownSplash active={splash.active} color={splash.color} x={splash.x} y={splash.y} />
+
+      {[...Array(10)].map((_,i) => (
+        <div key={i} style={{position:"fixed",bottom:-8,left:`${4+i*10}%`,width:`${3+(i%3)*2}px`,height:`${3+(i%3)*2}px`,borderRadius:"50%",background:"rgba(56,189,248,.1)",border:"1px solid rgba(56,189,248,.2)",animation:`rise ${7+i*1.2}s ease-in infinite`,animationDelay:`${i*.65}s`,zIndex:0,pointerEvents:"none"}}/>
+      ))}
+      <div style={{position:"fixed",inset:0,background:"radial-gradient(ellipse at 20% 50%,rgba(14,116,144,.12) 0%,transparent 60%),radial-gradient(ellipse at 80% 20%,rgba(30,58,138,.15) 0%,transparent 50%)",zIndex:0,pointerEvents:"none"}}/>
+
+      {/* Achievement toast */}
+      {newAchQ[0] && (
+        <div style={{position:"fixed",top:14,right:14,zIndex:9000,background:"rgba(8,18,36,.97)",border:"1px solid rgba(251,191,36,.4)",borderRadius:14,padding:"13px 16px",maxWidth:240,animation:"achIn 4s ease forwards",boxShadow:"0 8px 32px rgba(0,0,0,.6)"}}>
+          <div style={{fontSize:22,marginBottom:3}}>{newAchQ[0].icon}</div>
+          <div style={{color:"#fbbf24",fontSize:11,marginBottom:1}}>Досягнення!</div>
+          <div style={{color:"#f0f9ff",fontSize:12}}>{newAchQ[0].name}</div>
+          <div style={{display:"flex",gap:2,marginTop:3}}>{getTiers(newAchQ[0].earnedCount||1).map(t=><span key={t.e} style={{fontSize:12}}>{t.e}</span>)}</div>
+        </div>
+      )}
+
+      {/* New record toast */}
+      {newRec && (
+        <div style={{position:"fixed",top:newAchQ[0]?90:14,left:"50%",transform:"translateX(-50%)",zIndex:8900,background:"rgba(8,18,36,.97)",border:"1px solid rgba(251,191,36,.5)",borderRadius:14,padding:"13px 20px",textAlign:"center",animation:"pop .5s ease",boxShadow:"0 8px 32px rgba(251,191,36,.2)"}}>
+          <div style={{fontSize:26,marginBottom:2}}>🏅</div>
+          <div style={{color:"#fbbf24",fontSize:13,marginBottom:1}}>Новий рекорд!</div>
+          <div style={{color:"#f0f9ff",fontSize:21,fontFamily:"monospace"}}>{fmt(newRec.s)}</div>
+          <div style={{color:"#64748b",fontSize:10,marginTop:2}}>Молодець, Станіслав!</div>
+          <button onClick={() => setNewRec(null)} style={{marginTop:6,background:"none",border:"none",color:"#334155",cursor:"pointer",fontSize:10}}>✕</button>
+        </div>
+      )}
+
+      {/* Pending plan modal */}
+      {pendingPlan && (
+        <div style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,.9)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",padding:14}}>
+          <div style={{background:"#0a1628",border:"1px solid rgba(56,189,248,.3)",borderRadius:18,padding:22,maxWidth:440,width:"100%",maxHeight:"80vh",overflowY:"auto",animation:"pop .3s ease"}}>
+            <div style={{fontSize:10,letterSpacing:3,color:"#38bdf8",textTransform:"uppercase",marginBottom:6}}>Jan Claude One Damn</div>
+            <div style={{fontSize:16,color:"#f0f9ff",marginBottom:14}}>Пропозиція корекції плану</div>
+            {[...(pendingPlan.goalSuggestions||[]).map(s=>({...s,isGoal:true})), ...(pendingPlan.suggestions||[]).map(s=>({...s,isGoal:false}))].map((s,i) => (
+              <div key={i} style={{background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:11,marginBottom:9}}>
+                <div style={{fontSize:10,color:"#38bdf8",marginBottom:3}}>Тиждень {s.targetWeek} — {s.isGoal?"Ціль":"Блок "+(s.blockIndex+1)}</div>
+                <div style={{fontSize:11,color:"#475569",textDecoration:"line-through",marginBottom:2}}>Було: {s.original}</div>
+                <div style={{fontSize:12,color:"#4ade80",marginBottom:4}}>Буде: {s.proposed}</div>
+                <div style={{fontSize:10,color:"#64748b",fontStyle:"italic"}}>{s.reason}</div>
+              </div>
+            ))}
+            <div style={{display:"flex",gap:9,marginTop:14}}>
+              <button onClick={() => setPendingPlan(null)} style={{flex:1,padding:11,borderRadius:11,background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.2)",color:"#fca5a5",cursor:"pointer"}}>✕ Скасувати</button>
+              <button onClick={acceptPlan} style={{flex:2,padding:11,borderRadius:11,background:"linear-gradient(135deg,rgba(74,222,128,.18),rgba(14,116,144,.28))",border:"1px solid rgba(74,222,128,.3)",color:"#4ade80",cursor:"pointer"}}>✓ Прийняти зміни</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{position:"relative",zIndex:1,maxWidth:480,margin:"0 auto",paddingBottom:80}}>
+
+        {/* Header */}
+        <div style={{padding:"22px 16px 12px",textAlign:"center"}}>
+          <div style={{fontSize:9,letterSpacing:4,color:"#38bdf8",textTransform:"uppercase",marginBottom:4}}>Freediving Tracker</div>
+          <div style={{position:"relative"}}>
+          <button onClick={()=>setShowSettings(true)} title="Налаштування" style={{position:"absolute",right:0,top:0,background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:8,color:"#475569",fontSize:15,cursor:"pointer",padding:"3px 8px",lineHeight:1}}>⚙️</button>
+          <h1 style={{margin:0,fontSize:21,fontWeight:"normal",color:"#f0f9ff"}}>Станіслав Гойсан</h1>
+        </div>
+          <div style={{fontSize:10,color:"#475569",marginTop:3}}>Басейн 25м · Щосуботи 12:00 · 3.8м</div>
+          <div style={{marginTop:11,background:"rgba(255,255,255,.04)",borderRadius:100,height:4,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${(doneCount/12)*100}%`,background:"linear-gradient(90deg,#0ea5e9,#38bdf8,#7dd3fc)",borderRadius:100,transition:"width .5s",boxShadow:"0 0 10px rgba(56,189,248,.4)"}}/>
+          </div>
+          <div style={{marginTop:3,fontSize:10,color:"#475569"}}>{doneCount}/12 тренувань · Рекорд статики: {best>0?fmt(best):"—"}</div>
+
+          {!_fbDb && <div style={{fontSize:8,color:"#64748b",marginTop:2,cursor:"pointer"}} onClick={()=>setShowSettings(true)}>⚙️ Налаштуй Firebase або API ключ</div>}        </div>
+
+        {/* Tabs */}
+        <div style={{display:"flex",gap:2,margin:"0 14px 14px",background:"rgba(255,255,255,.03)",borderRadius:13,padding:3,border:"1px solid rgba(255,255,255,.06)"}}>
+          {TABS.map(t => (
+            <button key={t.id} onClick={e=>{setTab(t.id);triggerSplash(e,"#38bdf8");}} style={{flex:1,padding:"7px 2px",border:"none",borderRadius:10,background:tab===t.id?"rgba(56,189,248,.12)":"transparent",color:tab===t.id?"#38bdf8":"#475569",fontSize:9,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:1,borderBottom:tab===t.id?"2px solid #38bdf8":"2px solid transparent",transition:"all .2s"}}>
+              <span style={{fontSize:16}}>{t.e}</span><span>{t.l}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* ── PLAN ── */}
+        {tab==="plan" && (
+          <div style={{padding:"0 14px",animation:"fadeUp .3s ease"}}>
+            {/* Phases */}
+            <div style={{display:"flex",gap:7,marginBottom:13}}>
+              {PHASES.map(ph => {
+                const active = phase===ph.id;
+                return (
+                  <button key={ph.id} className="wbtn" onClick={e=>{setPhase(ph.id);setWeek(ph.weeks[0]);triggerSplash(e,ph.color);}} style={{flex:1,padding:"10px 4px",border:`1px solid ${active?ph.color:"rgba(255,255,255,.07)"}`,borderRadius:12,background:active?`rgba(${ph.rgb},.07)`:"rgba(255,255,255,.02)",color:active?ph.color:"#475569",fontSize:11,cursor:"pointer",textAlign:"center"}}>
+                    <div style={{fontWeight:"bold",marginBottom:1}}>{ph.name}</div>
+                    <div style={{opacity:.7,fontSize:9}}>{ph.subtitle}</div>
+                    <div style={{opacity:.5,fontSize:8}}>Тижні {ph.weeks[0]}–{ph.weeks[ph.weeks.length-1]}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Weeks */}
+            <div style={{display:"flex",gap:7,marginBottom:13}}>
+              {PHASES.find(p=>p.id===phase)?.weeks.map(w => {
+                const isDone=sessions[w]?.completed, isAct=week===w;
+                return (
+                  <button key={w} className="wbtn" onClick={e=>{setWeek(w);triggerSplash(e,phaseObj.color);}} style={{flex:1,height:46,borderRadius:10,background:isAct?"rgba(56,189,248,.14)":isDone?"rgba(74,222,128,.07)":"rgba(255,255,255,.02)",border:isAct?"2px solid #38bdf8":isDone?"1px solid rgba(74,222,128,.3)":"1px solid rgba(255,255,255,.07)",color:isAct?"#38bdf8":isDone?"#4ade80":"#64748b",fontSize:13,fontWeight:"bold",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1}}>
+                    <span>{w}</span>{isDone&&<span style={{fontSize:8}}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {plan && (
+              <>
+                <div style={{background:"rgba(255,255,255,.02)",border:`1px solid rgba(${phaseObj.rgb},.18)`,borderRadius:15,padding:14,marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:17,color:"#f0f9ff"}}>Тиждень {week}</div>
+                      <div style={{fontSize:10,color:phaseObj.color,marginTop:2}}>{phaseObj.name} — {phaseObj.subtitle}</div>
+                      {planAdj[week] && <div style={{fontSize:8,color:"#38bdf8",marginTop:2}}>✦ Скорегований AI</div>}
+                    </div>
+                    {sessions[week]?.completed && (
+                      <div style={{background:"rgba(74,222,128,.1)",border:"1px solid rgba(74,222,128,.3)",color:"#4ade80",padding:"2px 9px",borderRadius:100,fontSize:10}}>✓ Завершено</div>
+                    )}
+                  </div>
+
+                  {/* Goals — Статика is a deeplink */}
+                  <div style={{display:"flex",gap:6,marginBottom:12}}>
+                    {[{e:"⏱",l:"Статика",v:plan.goals.s,link:true},{e:"🏊",l:"Динаміка",v:plan.goals.d},{e:"🤿",l:"Глибина",v:plan.goals.g}].map((g,i) => (
+                      <div key={i} onClick={g.link ? e=>{setTab("staticka");triggerSplash(e,"#38bdf8");} : undefined}
+                        className={g.link?"wbtn":""}
+                        style={{flex:1,background:`rgba(${phaseObj.rgb},.05)`,border:`1px solid rgba(${phaseObj.rgb},.12)`,borderRadius:9,padding:"8px 4px",textAlign:"center",cursor:g.link?"pointer":"default"}}>
+                        <div style={{fontSize:13,marginBottom:2}}>{g.e}</div>
+                        <div style={{fontSize:8,color:"#64748b",marginBottom:1}}>{g.l}</div>
+                        <div style={{fontSize:8,color:phaseObj.color,lineHeight:1.3}}>{g.v}</div>
+                        {g.link && <div style={{fontSize:7,color:"#38bdf8",marginTop:2}}>→ Таймер</div>}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Blocks */}
+                  {plan.blocks.map((b,i) => {
+                    const ck=week+"_"+i, isDone=!!checks[ck], nk=week+"_n_"+i, nv=bNotes[nk]||"";
+                    return (
+                      <div key={i} style={{background:isDone?"rgba(74,222,128,.04)":"rgba(255,255,255,.01)",border:isDone?"1px solid rgba(74,222,128,.18)":"1px solid rgba(255,255,255,.05)",borderRadius:9,padding:"10px 11px",marginBottom:7,transition:"all .2s"}}>
+                        <div style={{display:"flex",alignItems:"flex-start",gap:8}}>
+                          <button onClick={()=>toggleCheck(ck)} style={{width:20,height:20,minWidth:20,borderRadius:5,border:isDone?"2px solid #4ade80":"2px solid rgba(255,255,255,.2)",background:isDone?"rgba(74,222,128,.15)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",marginTop:1,transition:"all .2s",color:"#4ade80",fontSize:11}}>
+                            {isDone?"✓":""}
+                          </button>
+                          <div style={{flex:1}}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
+                              <span style={{color:isDone?"#4ade80":"#e2e8f0",fontSize:12,opacity:isDone?.65:1,textDecoration:isDone?"line-through":"none"}}>{b.n}</span>
+                              <span style={{color:"#475569",fontSize:10}}>{b.t}</span>
+                            </div>
+                            <div style={{color:"#64748b",fontSize:11,lineHeight:1.5,marginBottom:5}}>{b.d}</div>
+                            <textarea rows={1} placeholder="Нотатки до блоку..." value={nv} onChange={e=>updateBNote(nk,e.target.value)} style={{resize:"vertical",minHeight:27,fontSize:10,color:"#94a3b8",borderColor:"rgba(255,255,255,.06)",padding:"4px 8px"}}/>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{background:"rgba(251,191,36,.04)",border:"1px solid rgba(251,191,36,.15)",borderRadius:8,padding:"8px 11px",fontSize:11,color:"#fbbf24",marginTop:3}}>💡 {plan.tip}</div>
+                </div>
+
+                {!sessions[week]?.completed
+                  ? <button className="wbtn" onClick={e=>{triggerSplash(e,phaseObj.color);setEditW({week,...(sessions[week]||{completed:false,date:"",staticTime:"",dynamicDist:"",avgHR:"",maxHR:"",notes:"",feeling:""})});}} style={{width:"100%",padding:11,borderRadius:11,background:`linear-gradient(135deg,rgba(${phaseObj.rgb},.18),rgba(30,58,138,.28))`,border:`1px solid rgba(${phaseObj.rgb},.3)`,color:phaseObj.color,fontSize:13,cursor:"pointer",marginBottom:9}}>+ Записати результат тренування</button>
+                  : <button className="wbtn" onClick={e=>{triggerSplash(e,"#4ade80");setEditW({week,...sessions[week]});}} style={{width:"100%",padding:11,borderRadius:11,background:"rgba(74,222,128,.04)",border:"1px solid rgba(74,222,128,.2)",color:"#4ade80",fontSize:12,cursor:"pointer",marginBottom:9}}>✏️ Редагувати запис</button>
+                }
+
+                {/* AI Analysis */}
+                {sessions[week]?.completed && (
+                  <div style={{background:"rgba(14,30,58,.6)",border:"1px solid rgba(56,189,248,.2)",borderRadius:13,padding:14,marginBottom:9}}>
+                    <div style={{fontSize:9,letterSpacing:3,color:"#38bdf8",textTransform:"uppercase",marginBottom:8}}>🤖 Jan Claude One Damn</div>
+                    {fitData[week] && (
+                      <div style={{background:"rgba(56,189,248,.04)",border:"1px solid rgba(56,189,248,.1)",borderRadius:9,padding:9,marginBottom:9}}>
+                        <div style={{fontSize:9,color:"#38bdf8",marginBottom:5}}>📈 HR — Garmin Descend MK2S</div>
+                        <HRChart pts={fitData[week].pts} color="#38bdf8"/>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5,marginTop:7}}>
+                          {[{l:"Avg HR",v:fitData[week].stats.avg},{l:"Max HR",v:fitData[week].stats.max},{l:"Min HR",v:fitData[week].stats.min}].map((s,i)=>(
+                            <div key={i} style={{textAlign:"center",background:"rgba(255,255,255,.03)",borderRadius:6,padding:"5px 3px"}}>
+                              <div style={{fontSize:13,color:s.l==="Max HR"&&s.v>120?"#f87171":s.l==="Min HR"&&s.v<85?"#4ade80":"#e2e8f0"}}>{s.v||"—"}</div>
+                              <div style={{fontSize:8,color:"#475569"}}>{s.l}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {aiCache[week] && (
+                      <div style={{animation:"fadeUp .3s ease"}}>
+                        <div style={{background:aiCache[week].verdict==="critical"?"rgba(239,68,68,.06)":aiCache[week].verdict==="warning"?"rgba(251,191,36,.06)":"rgba(74,222,128,.04)",border:`1px solid ${aiCache[week].verdict==="critical"?"rgba(239,68,68,.2)":aiCache[week].verdict==="warning"?"rgba(251,191,36,.2)":"rgba(74,222,128,.15)"}`,borderRadius:9,padding:11,marginBottom:9}}>
+                          <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.7}}>{aiCache[week].analysis}</div>
+                        </div>
+                        {(aiCache[week].suggestions?.length||aiCache[week].goalSuggestions?.length) > 0 && !planAdj[week] && (
+                          <button className="wbtn" onClick={()=>setPendingPlan({week,...aiCache[week]})} style={{width:"100%",padding:9,borderRadius:9,background:"rgba(56,189,248,.07)",border:"1px solid rgba(56,189,248,.22)",color:"#38bdf8",fontSize:11,cursor:"pointer",marginBottom:7}}>
+                            📋 Переглянути пропозиції корекції плану
+                          </button>
+                        )}
+                        {planAdj[week] && <div style={{fontSize:10,color:"#4ade80",textAlign:"center",marginBottom:7}}>✓ План скорегований</div>}
+                      </div>
+                    )}
+                    {aiError && <div style={{color:"#fca5a5",fontSize:10,marginBottom:7}}>{aiError}</div>}
+                    <button className="wbtn" onClick={()=>runAnalysis(week)} disabled={aiLoading} style={{width:"100%",padding:9,borderRadius:9,background:aiLoading?"rgba(255,255,255,.02)":"rgba(56,189,248,.09)",border:"1px solid rgba(56,189,248,.22)",color:aiLoading?"#475569":"#38bdf8",fontSize:11,cursor:aiLoading?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>
+                      {aiLoading ? <><div style={{width:13,height:13,border:"2px solid #38bdf8",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Аналізую...</> : "🔍 Аналіз від Jan Claude One Damn"}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── СТАТИКА ── */}
+        {tab==="staticka" && (
+          <div style={{padding:"0 14px",animation:"fadeUp .3s ease"}}>
+            {/* Timer */}
+            <div style={{background:"rgba(255,255,255,.02)",border:"1px solid rgba(56,189,248,.15)",borderRadius:18,padding:"24px 14px",marginBottom:14,textAlign:"center"}}>
+              <div style={{fontSize:9,letterSpacing:3,color:"#475569",textTransform:"uppercase",marginBottom:11}}>Статична затримка дихання</div>
+              <div style={{fontSize:62,fontFamily:"monospace",color:running?"#38bdf8":"#f0f9ff",letterSpacing:4,lineHeight:1,marginBottom:5,animation:running?"glow 2s ease infinite":"none"}}>{fmt(secs)}</div>
+              {best>0 && (
+                <div style={{fontSize:11,color:"#475569",marginBottom:14}}>
+                  Рекорд: <span style={{color:"#fbbf24"}}>{fmt(best)}</span>
+                  {running && secs<best && <span style={{color:"#64748b"}}> · ще {fmt(best-secs)}</span>}
+                  {running && secs>=best && <span style={{color:"#4ade80"}}> 🔥 Рекорд!</span>}
+                </div>
+              )}
+              {!running
+                ? <button onClick={startTimer} style={{width:120,height:120,borderRadius:"50%",background:"linear-gradient(135deg,rgba(14,116,144,.4),rgba(30,58,138,.5))",border:"3px solid rgba(56,189,248,.5)",color:"#38bdf8",fontSize:14,cursor:"pointer",animation:"pulse 2s ease infinite",display:"inline-flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
+                    <span style={{fontSize:28}}>🤿</span><span>СТАРТ</span>
+                  </button>
+                : <button onClick={stopTimer} style={{width:120,height:120,borderRadius:"50%",background:"linear-gradient(135deg,rgba(239,68,68,.3),rgba(185,28,28,.4))",border:"3px solid rgba(239,68,68,.5)",color:"#fca5a5",fontSize:14,cursor:"pointer",animation:"pulseRed 1.2s ease infinite",display:"inline-flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
+                    <span style={{fontSize:28}}>✋</span><span>СТОП</span>
+                  </button>
+              }
+              <div style={{marginTop:11,fontSize:10,color:"#334155"}}>{running?"Натисни СТОП коли захочеш видихнути":"Натисни СТАРТ перед затримкою"}</div>
+            </div>
+
+            {/* History toggle */}
+            {records.length > 0 && (
+              <div style={{marginBottom:13}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{fontSize:9,letterSpacing:3,color:"#475569",textTransform:"uppercase"}}>Історія затримок</div>
+                  <div style={{display:"flex",gap:4}}>
+                    {["chart","table"].map(v => (
+                      <button key={v} onClick={()=>setHistView(v)} style={{padding:"3px 10px",borderRadius:20,border:`1px solid ${histView===v?"rgba(56,189,248,.4)":"rgba(255,255,255,.07)"}`,background:histView===v?"rgba(56,189,248,.12)":"transparent",color:histView===v?"#38bdf8":"#475569",fontSize:9,cursor:"pointer"}}>
+                        {v==="chart"?"📈 Графік":"📋 Таблиця"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {histView==="chart" && (
+                  <div style={{background:"rgba(255,255,255,.02)",border:"1px solid rgba(56,189,248,.12)",borderRadius:12,padding:"12px 10px"}}>
+                    <div style={{fontSize:10,color:"#475569",marginBottom:6}}>Прогрес статики · 🏅 = рекорд</div>
+                    <StaticHistoryChart records={records}/>
+                    {/* Stats row */}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginTop:10}}>
+                      {[
+                        {l:"Рекорд",v:fmt(best),c:"#fbbf24"},
+                        {l:"Середнє",v:fmt(Math.round(records.reduce((a,r)=>a+r.s,0)/records.length)),c:"#38bdf8"},
+                        {l:"Сесій",v:records.length,c:"#94a3b8"},
+                        {l:"Рекордів",v:records.filter(r=>r.rec).length,c:"#4ade80"},
+                      ].map((s,i) => (
+                        <div key={i} style={{textAlign:"center",background:"rgba(255,255,255,.03)",borderRadius:7,padding:"6px 3px"}}>
+                          <div style={{fontSize:13,color:s.c,fontFamily:"monospace"}}>{s.v}</div>
+                          <div style={{fontSize:8,color:"#475569",marginTop:1}}>{s.l}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {histView==="table" && (
+                  <div style={{background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,overflow:"hidden"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"24px 1fr auto auto",borderBottom:"1px solid rgba(255,255,255,.05)"}}>
+                      {["#","Час","Дата",""].map((h,i) => (
+                        <div key={i} style={{padding:"7px 9px",fontSize:8,color:"#475569",letterSpacing:1,textTransform:"uppercase"}}>{h}</div>
+                      ))}
+                    </div>
+                    {records.slice(0,25).map((r,i) => (
+                      <div key={i} style={{display:"grid",gridTemplateColumns:"24px 1fr auto auto",borderBottom:"1px solid rgba(255,255,255,.03)",background:i%2?"rgba(255,255,255,.01)":"transparent"}}>
+                        <div style={{padding:"8px 9px",fontSize:10,color:"#334155"}}>{i+1}</div>
+                        <div style={{padding:"8px 9px",fontSize:16,fontFamily:"monospace",color:r.rec?"#fbbf24":"#e2e8f0",display:"flex",alignItems:"center",gap:4}}>
+                          {fmt(r.s)}{r.rec && <span style={{fontSize:10}}>🏅</span>}
+                        </div>
+                        <div style={{padding:"8px 7px",fontSize:9,color:"#475569",lineHeight:1.4}}>{r.date}<br/>{r.time}</div>
+                        <div style={{padding:"8px 7px",display:"flex",alignItems:"center"}}>
+                          <button onClick={async()=>{const u=records.filter((_,idx)=>idx!==i);setRecords(u);await store.set("fd5_records",u);}} style={{background:"none",border:"none",color:"#374151",cursor:"pointer",fontSize:12}}>✕</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Achievements */}
+            <div style={{marginBottom:13}}>
+              <div style={{fontSize:9,letterSpacing:3,color:"#475569",textTransform:"uppercase",marginBottom:9}}>Досягнення <span style={{color:"#334155",fontWeight:"normal"}}>(натисни для деталей)</span></div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                {ACH_DEFS.map(a => <AchBadge key={a.id} def={a} count={achCounts[a.id]||0}/>)}
+              </div>
+              {/* Cup legend */}
+              <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:9,padding:"7px 10px",background:"rgba(255,255,255,.02)",borderRadius:9}}>
+                {[{e:"🥉",n:"Бронза",r:"1–10"},{e:"🥈",n:"Срібло",r:"11–50"},{e:"🥇",n:"Золото",r:"51–99"},{e:"🏆",n:"Платина",r:"100+"}].map(t => (
+                  <div key={t.e} style={{textAlign:"center"}}>
+                    <div style={{fontSize:16}}>{t.e}</div>
+                    <div style={{fontSize:8,color:"#64748b"}}>{t.r}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── PROGRESS ── */}
+        {tab==="progress" && (
+          <div style={{padding:"0 14px",animation:"fadeUp .3s ease"}}>
+            <div style={{display:"flex",gap:7,marginBottom:14}}>
+              {[{l:"Тренувань",v:`${doneCount}/12`,e:"✅"},{l:"Рекорд статики",v:best>0?fmt(best):"—",e:"🏅"},{l:"Сесій таймера",v:records.length,e:"⏱"}].map((s,i) => (
+                <div key={i} style={{flex:1,background:"rgba(255,255,255,.02)",border:"1px solid rgba(255,255,255,.06)",borderRadius:11,padding:"11px 6px",textAlign:"center"}}>
+                  <div style={{fontSize:18,marginBottom:2}}>{s.e}</div>
+                  <div style={{fontSize:15,color:"#38bdf8",marginBottom:2}}>{s.v}</div>
+                  <div style={{fontSize:8,color:"#475569"}}>{s.l}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Session history chart */}
+            {doneCount >= 2 && (
+              <div style={{background:"rgba(255,255,255,.02)",border:"1px solid rgba(74,222,128,.12)",borderRadius:12,padding:"12px 10px",marginBottom:13}}>
+                <div style={{fontSize:9,color:"#4ade80",marginBottom:6,letterSpacing:2,textTransform:"uppercase"}}>Прогрес статики по тижнях</div>
+                <SessionHistoryChart sessions={sessions}/>
+              </div>
+            )}
+
+            <div style={{fontSize:9,letterSpacing:3,color:"#475569",textTransform:"uppercase",marginBottom:9}}>Журнал тренувань</div>
+            {Object.keys(sessions).length===0
+              ? <div style={{background:"rgba(255,255,255,.02)",border:"1px dashed rgba(255,255,255,.06)",borderRadius:11,padding:24,textAlign:"center",color:"#475569",fontSize:12}}>Результатів поки немає.<br/>Запиши перше тренування!</div>
+              : [...Array(12)].map((_,i) => {
+                  const w=i+1, s=sessions[w];
+                  if (!s?.completed) return null;
+                  return (
+                    <div key={w} style={{background:"rgba(74,222,128,.02)",border:"1px solid rgba(74,222,128,.1)",borderRadius:11,padding:12,marginBottom:7}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                        <span style={{color:"#4ade80",fontSize:12}}>Тиждень {w}</span>
+                        <span style={{color:"#475569",fontSize:10}}>{s.date}</span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                        {s.staticTime  && <div style={{fontSize:10}}><span style={{color:"#475569"}}>Статика: </span><span>{s.staticTime}</span></div>}
+                        {s.dynamicDist && <div style={{fontSize:10}}><span style={{color:"#475569"}}>Динаміка: </span><span>{s.dynamicDist}</span></div>}
+                        {s.avgHR       && <div style={{fontSize:10}}><span style={{color:"#475569"}}>Avg HR: </span><span>{s.avgHR}</span></div>}
+                        {s.maxHR       && <div style={{fontSize:10}}><span style={{color:"#475569"}}>Max HR: </span><span>{s.maxHR}</span></div>}
+                      </div>
+                      {s.feeling && <div style={{marginTop:4,fontSize:10,color:"#64748b"}}>Самопочуття: {s.feeling}</div>}
+                      {s.notes   && <div style={{marginTop:3,fontSize:10,color:"#64748b",fontStyle:"italic"}}>"{s.notes}"</div>}
+                      <div style={{display:"flex",gap:6,marginTop:5}}>
+                        {fitData[w] && <div style={{fontSize:9,color:"#38bdf8"}}>📊 HR avg {fitData[w].stats.avg}/{fitData[w].stats.max}</div>}
+                        {aiCache[w] && <div style={{fontSize:9,color:"#a78bfa"}}>🤖 AI аналіз</div>}
+                      </div>
+                    </div>
+                  );
+                })
+            }
+          </div>
+        )}
+
+        {/* ── INFO ── */}
+        {tab==="info" && (
+          <div style={{padding:"0 14px",animation:"fadeUp .3s ease"}}>
+            <div style={{fontSize:9,letterSpacing:3,color:"#475569",textTransform:"uppercase",marginBottom:11}}>Техніки і знання</div>
+            {INFO_DATA.map((card,idx) => <InfoCard key={idx} card={card}/>)}
+          </div>
+        )}
+
+        {/* ── RULES ── */}
+        {tab==="rules" && (
+          <div style={{padding:"0 14px",animation:"fadeUp .3s ease"}}>
+            {[
+              {title:"Золоті правила",color:"rgba(56,189,248,.05)",border:"rgba(56,189,248,.15)",tc:"#e2e8f0",items:["💧 500мл води за 30 хв до тренування","❤️ Пульс < 85 перед кожним зануренням","😴 Стрес або поганий сон — знижуй інтенсивність вдвічі","🎯 Не більше 1 максимального зусилля за тренування","👤 Завжди повідомляй когось","🚨 Будь-який дискомфорт — негайно виходь"]},
+              {title:"Серце: пролапс МК 1 ст.",color:"rgba(239,68,68,.04)",border:"rgba(239,68,68,.18)",tc:"#fca5a5",items:["🚩 Серцебиття, біль у грудях — СТОП","⏱ Пульс < 85 перед кожним зануренням","💧 Дегідратація підвищує ризик аритмій","😤 Гіпервентиляція перед пірнанням — ЗАБОРОНЕНА"]},
+              {title:"Правило відпочинку",color:"rgba(251,191,36,.04)",border:"rgba(251,191,36,.15)",tc:"#fbbf24",items:["⏳ Відпочинок = мінімум 3× тривалість","🤿 Пірнав 1 хв → відпочивай 3 хв мінімум","❤️ Заходь у воду тільки при пульсі < 85"]},
+            ].map((s,si) => (
+              <div key={si} style={{marginBottom:14}}>
+                <div style={{fontSize:9,letterSpacing:3,color:"#475569",textTransform:"uppercase",marginBottom:7}}>{s.title}</div>
+                {s.items.map((item,i) => (
+                  <div key={i} style={{background:s.color,border:`1px solid ${s.border}`,borderRadius:9,padding:"9px 12px",marginBottom:5,fontSize:11,color:s.tc,lineHeight:1.5}}>{item}</div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Edit session modal ── */}
+      {editW && (
+        <div style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,.9)",backdropFilter:"blur(8px)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={e=>{if(e.target===e.currentTarget)setEditW(null);}}>
+          <div style={{background:"#0a1628",borderRadius:"18px 18px 0 0",border:"1px solid rgba(56,189,248,.2)",width:"100%",maxWidth:480,padding:20,maxHeight:"88vh",overflowY:"auto"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{fontSize:15,color:"#f0f9ff"}}>Тиждень {editW.week} — Результат</div>
+              <button onClick={()=>setEditW(null)} style={{background:"none",border:"none",color:"#475569",fontSize:18,cursor:"pointer"}}>✕</button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:11}}>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",display:"block",marginBottom:3}}>Дата</label>
+                <input type="date" value={editW.date||""} onChange={e=>setEditW({...editW,date:e.target.value})}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+                <div><label style={{fontSize:10,color:"#64748b",display:"block",marginBottom:3}}>Статика (хв:сек)</label><input placeholder="2:30" value={editW.staticTime||""} onChange={e=>setEditW({...editW,staticTime:e.target.value})}/></div>
+                <div><label style={{fontSize:10,color:"#64748b",display:"block",marginBottom:3}}>Динаміка (м)</label><input placeholder="50м" value={editW.dynamicDist||""} onChange={e=>setEditW({...editW,dynamicDist:e.target.value})}/></div>
+                <div><label style={{fontSize:10,color:"#64748b",display:"block",marginBottom:3}}>Avg HR</label><input placeholder="102" value={editW.avgHR||""} onChange={e=>setEditW({...editW,avgHR:e.target.value})}/></div>
+                <div><label style={{fontSize:10,color:"#64748b",display:"block",marginBottom:3}}>Max HR</label><input placeholder="123" value={editW.maxHR||""} onChange={e=>setEditW({...editW,maxHR:e.target.value})}/></div>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",display:"block",marginBottom:3}}>Самопочуття</label>
+                <div style={{display:"flex",gap:4}}>
+                  {["😫 Важко","😐 Нормально","😊 Добре","🔥 Відмінно"].map(f => (
+                    <button key={f} onClick={()=>setEditW({...editW,feeling:f})} style={{flex:1,padding:"6px 2px",borderRadius:7,fontSize:8,background:editW.feeling===f?"rgba(56,189,248,.15)":"rgba(255,255,255,.03)",border:editW.feeling===f?"1px solid rgba(56,189,248,.4)":"1px solid rgba(255,255,255,.07)",color:editW.feeling===f?"#38bdf8":"#64748b",cursor:"pointer"}}>{f}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:10,color:"#64748b",display:"block",marginBottom:3}}>Нотатки</label>
+                <textarea rows={3} placeholder="Що вдалось, що ні..." value={editW.notes||""} onChange={e=>setEditW({...editW,notes:e.target.value})} style={{resize:"none"}}/>
+              </div>
+
+              {/* FIT upload */}
+              <div>
+                <label style={{fontSize:10,color:"#64748b",display:"block",marginBottom:3}}>📊 FIT файл (Garmin Descend MK2S)</label>
+                <input ref={fileRef} type="file" accept=".fit,.FIT" style={{display:"none"}} onChange={async e=>{const f=e.target.files?.[0]; if(f) await handleFitUpload(f,editW.week);}}/>
+                <button className="wbtn" onClick={()=>fileRef.current?.click()} disabled={fitLoading} style={{width:"100%",padding:9,borderRadius:8,background:"rgba(56,189,248,.06)",border:"1px solid rgba(56,189,248,.2)",color:fitLoading?"#475569":"#38bdf8",fontSize:11,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:7}}>
+                  {fitLoading
+                    ? <><div style={{width:12,height:12,border:"2px solid #38bdf8",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Парсинг...</>
+                    : fitData[editW.week] ? "✓ FIT завантажено — оновити" : "📁 Завантажити .fit файл"
+                  }
+                </button>
+                {fitData[editW.week] && (
+                  <div style={{marginTop:7,background:"rgba(56,189,248,.04)",borderRadius:8,padding:"8px 9px"}}>
+                    <HRChart pts={fitData[editW.week].pts} color="#38bdf8"/>
+                    <div style={{display:"flex",gap:7,marginTop:5,justifyContent:"center"}}>
+                      {[{l:"Avg",v:fitData[editW.week].stats.avg},{l:"Max",v:fitData[editW.week].stats.max},{l:"Хв",v:fitData[editW.week].stats.dur}].map((s,i)=>(
+                        <div key={i} style={{textAlign:"center"}}><div style={{fontSize:12,color:"#e2e8f0"}}>{s.v}</div><div style={{fontSize:8,color:"#475569"}}>{s.l}</div></div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{display:"flex",gap:7,marginTop:14}}>
+              <button onClick={()=>setEditW(null)} style={{flex:1,padding:11,borderRadius:11,background:"rgba(255,255,255,.03)",border:"1px solid rgba(255,255,255,.07)",color:"#64748b",cursor:"pointer"}}>Скасувати</button>
+              <button onClick={()=>saveSession(editW.week,{...editW,completed:true})} style={{flex:2,padding:11,borderRadius:11,background:"linear-gradient(135deg,rgba(14,116,144,.4),rgba(30,58,138,.4))",border:"1px solid rgba(56,189,248,.3)",color:"#38bdf8",fontSize:13,cursor:"pointer"}}>✓ Зберегти</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+</body>
+</html>
