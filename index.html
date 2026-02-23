@@ -7,6 +7,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#050d1a;font-family:Georgia,serif;color:#e2e8f0;overflow-x:hidden}
@@ -145,13 +147,62 @@ function beep(ctx, freq=440, dur=0.15, vol=0.3) {
 }
 const vib = p => { try { navigator.vibrate && navigator.vibrate(p); } catch(e) {} };
 
+// Firebase + localStorage hybrid
+function getApiKey() { return localStorage.getItem("claude_api_key") || ""; }
+function getFirebaseCfg() { try { return JSON.parse(localStorage.getItem("fb_cfg") || "null"); } catch(e) { return null; } }
+
+var _fbDb = null;
+
+function initFirebase(cfg) {
+  try {
+    if (typeof firebase === "undefined") {
+      console.error("Firebase SDK не завантажений");
+      return false;
+    }
+
+    // якщо вже є app — не створюємо новий
+    var app;
+    if (firebase.apps && firebase.apps.length) {
+      app = firebase.app();
+    } else {
+      app = firebase.initializeApp(cfg);
+    }
+
+    _fbDb = firebase.database(app);
+    return true;
+
+  } catch(e) {
+    console.error("FB init:", e);
+    _fbDb = null;
+    return false;
+  }
+}
+var _userId = localStorage.getItem("fd_user_id");
+if (!_userId) { _userId = "u_" + Math.random().toString(36).slice(2,10); localStorage.setItem("fd_user_id", _userId); }
+
 const store = {
-  get:  async k => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch(e) { return null; } },
-  set:  async (k,v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} }
+  async get(key) {
+    if (_fbDb) {
+      try { var s = await _fbDb.ref("users/" + _userId + "/" + key).get(); if (s.exists()) { localStorage.setItem("fd5_" + key, JSON.stringify(s.val())); return s.val(); } } catch(e) {}
+    }
+    try { var v = localStorage.getItem("fd5_" + key); return v ? JSON.parse(v) : null; } catch(e) { return null; }
+  },
+  async set(key, val) {
+    try { localStorage.setItem("fd5_" + key, JSON.stringify(val)); } catch(e) {}
+    if (_fbDb) { try { await _fbDb.ref("users/" + _userId + "/" + key).set(val); } catch(e) {} }
+  },
+  sub(key, cb) {
+    if (!_fbDb) return function(){};
+    var ref = _fbDb.ref("users/" + _userId + "/" + key);
+    ref.on("value", function(s){ if(s.exists()) cb(s.val()); });
+    return function(){ ref.off("value"); };
+  }
 };
 
 // ─── AI ANALYSIS ──────────────────────────────────────────────────────────────
 async function runAIAnalysis(payload) {
+  var apiKey = getApiKey();
+  if (!apiKey) throw new Error("API ключ не налаштований. Відкрий налаштування (⚙️) та введи свій Anthropic API ключ.");
   const { week, session, fitStats, planBlocks, planGoals, blockNotes, timerRecords, allSessions } = payload;
   const fitInfo = fitStats
     ? "\nFIT: avg HR=" + fitStats.avg + ", max HR=" + fitStats.max + ", min HR=" + fitStats.min + ", тривалість=" + fitStats.dur + " хв"
@@ -200,14 +251,21 @@ async function runAIAnalysis(payload) {
 
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-opus-4-5",
       max_tokens: 1000,
       system: "Ти — Jan Claude One Damn, персональний AI-тренер фрідайвінгу для Станіслава Гойсана (29 р., колишній плавець 1 розряду, рекорд динаміки 75м, пролапс МК 1 ст.). Відповідай ВИКЛЮЧНО українською. Повертай ТІЛЬКИ валідний JSON без будь-якого іншого тексту, без markdown.",
       messages: [{ role:"user", content: promptText }]
     })
   });
+  if (!resp.ok) {
+    var errBody = await resp.text();
+    throw new Error("API " + resp.status + ": " + errBody.slice(0,300));
+  }
   const data = await resp.json();
   const raw = (data.content||[]).map(c => c.text||"").join("");
   const clean = raw.replace(/\x60\x60\x60json|\x60\x60\x60/g,"").trim();
@@ -493,6 +551,189 @@ function InfoCard({ card }) {
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
+
+// ─── SETTINGS MODAL ──────────────────────────────────────────────────────────
+function SettingsModal({ onClose, onFirebaseReady }) {
+  const [apiKey, setApiKey]   = useState(getApiKey());
+  const [fbCfg,  setFbCfg]   = useState(localStorage.getItem("fb_cfg") || "");
+  const [fbStatus, setFbStatus] = useState("");
+  const [saved,  setSaved]   = useState(false);
+  const [step,   setStep]    = useState(getFirebaseCfg() ? 5 : 0);
+  const hasFb = !!getFirebaseCfg();
+
+  const STEPS = [
+    {
+      icon:"🔑", color:"#38bdf8",
+      title:"Крок 1 \u2014 Google акаунт",
+      body:"Потрібен безкоштовний Google акаунт. Якщо вже є \u2014 натисни Далі.",
+      action:{label:"Створити Google акаунт", url:"https://accounts.google.com/signup"},
+      hint:"Firebase \u2014 безкоштовний сервіс Google. Акаунт потрібен для входу."
+    },
+    {
+      icon:"🔥", color:"#fb923c",
+      title:"Крок 2 \u2014 Firebase Console",
+      body:"Відкрий Firebase Console і увійди своїм Google акаунтом.",
+      action:{label:"Відкрити console.firebase.google.com", url:"https://console.firebase.google.com"},
+      hint:"Безкоштовний план Spark включає 1 ГБ бази даних і 10 ГБ трафіку \u2014 вистачить на роки."
+    },
+    {
+      icon:"📁", color:"#fbbf24",
+      title:"Крок 3 \u2014 Створи проект",
+      body:"В Firebase Console натисни «Add project».",
+      steps2:["Введи назву: freediving-tracker","Google Analytics \u2014 вимкни (не потрібно)","Натисни «Create project»","Зачекай ~30 секунд"],
+      hint:"Проект \u2014 це хмарний контейнер для твоїх даних тренувань."
+    },
+    {
+      icon:"🗄️", color:"#a78bfa",
+      title:"Крок 4 \u2014 Realtime Database",
+      body:"В лівому меню Firebase: Build → Realtime Database → Create database",
+      steps2:["Вибери регіон europe-west1","Обов'язково вибери «Start in test mode»","Натисни «Enable»"],
+      hint:"Test mode дозволяє зберігати дані без налаштування авторизації."
+    },
+    {
+      icon:"⚙️", color:"#4ade80",
+      title:"Крок 5 \u2014 Отримай конфіг",
+      body:"Отримай firebaseConfig для вставки в застосунок:",
+      steps2:["Натисни шестерню ⚙️ біля «Project Overview» → «Project settings»","Прокрути до розділу «Your apps»","Натисни іконку </> (Web app)","Введи назву: freediving → «Register app»","Скопіюй весь об'єкт firebaseConfig (від { до })"],
+      hint:'Конфіг виглядає так: { "apiKey": "AIza...", "databaseURL": "https://xxx-rtdb.firebaseio.com", ... }'
+    },
+    {
+      icon:"✅", color:"#4ade80",
+      title:"Крок 6 \u2014 Встав конфіг",
+      body:"Встав скопійований firebaseConfig у поле нижче у форматі JSON.",
+      hint:"Після збереження дані одразу синхронізуватимуться між усіма твоїми пристроями!"
+    }
+  ];
+
+  const save = () => {
+    localStorage.setItem("claude_api_key", apiKey.trim());
+    if (fbCfg.trim()) {
+      try {
+        const cfg = JSON.parse(fbCfg.trim());
+        if (!cfg.databaseURL) {
+          setFbStatus("Помилка: у конфігу відсутній databaseURL. Переконайся що Realtime Database створена (не Firestore).");
+          return;
+        }
+        const ok = initFirebase(cfg);
+        localStorage.setItem("fb_cfg", fbCfg.trim());
+        setFbStatus(ok ? "ok" : "err");
+        if (ok && onFirebaseReady) onFirebaseReady();
+      } catch(e) {
+        setFbStatus("Невалідний JSON: " + e.message);
+        return;
+      }
+    } else {
+      setFbStatus("local");
+    }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  const s = STEPS[step];
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(0,0,0,.95)",backdropFilter:"blur(12px)",display:"flex",alignItems:"center",justifyContent:"center",padding:14,overflowY:"auto"}}>
+      <div style={{background:"#080f1e",border:"1px solid rgba(56,189,248,.22)",borderRadius:20,padding:20,maxWidth:440,width:"100%",animation:"pop .3s ease"}}>
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <div style={{fontSize:9,letterSpacing:3,color:"#38bdf8",textTransform:"uppercase"}}>Налаштування</div>
+            <div style={{fontSize:14,color:"#f0f9ff",marginTop:2}}>Firebase + AI підключення</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#475569",fontSize:19,cursor:"pointer"}}>&#x2715;</button>
+        </div>
+
+        <div style={{display:"flex",gap:5,marginBottom:16,padding:"9px 12px",background:"rgba(255,255,255,.03)",borderRadius:10}}>
+          {[{icon:getApiKey()?"🟢":"🔴",label:"AI ключ"},{icon:hasFb?"🟢":"🔴",label:"Firebase"},{icon:hasFb?"🔄":"💾",label:hasFb?"Хмара":"Локально"}].map((x,i)=>(
+            <div key={i} style={{flex:1,textAlign:"center"}}>
+              <div style={{fontSize:15}}>{x.icon}</div>
+              <div style={{fontSize:8,color:"#475569",marginTop:1}}>{x.label}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{marginBottom:16,background:"rgba(56,189,248,.04)",border:"1px solid rgba(56,189,248,.14)",borderRadius:11,padding:13}}>
+          <div style={{fontSize:11,color:"#38bdf8",marginBottom:7}}>🤖 Anthropic API ключ — для AI аналізу тренувань</div>
+          <input type="password" placeholder="sk-ant-api03-..." value={apiKey} onChange={e=>setApiKey(e.target.value)} style={{marginBottom:6}}/>
+          <div style={{fontSize:9,color:"#475569",lineHeight:1.6}}>
+            1. Відкрий <span style={{color:"#38bdf8",cursor:"pointer",textDecoration:"underline"}} onClick={()=>window.open("https://console.anthropic.com","_blank")}>console.anthropic.com</span>
+            {" → API Keys → Create Key → скопіюй → встав сюди."}
+          </div>
+        </div>
+
+        <div style={{background:"rgba(251,146,60,.04)",border:"1px solid rgba(251,146,60,.16)",borderRadius:11,padding:13,marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:11}}>
+            <div style={{fontSize:11,color:"#fb923c"}}>🔥 Firebase — хмарна синхронізація</div>
+            {hasFb&&<div style={{fontSize:8,color:"#4ade80",background:"rgba(74,222,128,.1)",padding:"2px 7px",borderRadius:20}}>Підключено ✓</div>}
+          </div>
+
+          <div style={{display:"flex",gap:3,marginBottom:13}}>
+            {STEPS.map((_,i)=>(
+              <div key={i} onClick={()=>setStep(i)} style={{flex:1,height:3,borderRadius:2,background:i<=step?"rgba(251,146,60,.75)":"rgba(255,255,255,.08)",cursor:"pointer",transition:"all .2s"}}/>
+            ))}
+          </div>
+
+          <div style={{background:"rgba(0,0,0,.25)",borderRadius:10,padding:11,marginBottom:10}}>
+            <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:7}}>
+              <span style={{fontSize:19}}>{s.icon}</span>
+              <div style={{fontSize:12,color:"#f0f9ff"}}>{s.title}</div>
+            </div>
+            <div style={{fontSize:11,color:"#94a3b8",lineHeight:1.6,marginBottom:s.steps2?7:0}}>{s.body}</div>
+            {s.steps2&&(
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {s.steps2.map((txt,i)=>(
+                  <div key={i} style={{display:"flex",gap:7,alignItems:"flex-start"}}>
+                    <div style={{minWidth:17,height:17,borderRadius:"50%",background:"rgba(251,146,60,.18)",border:"1px solid rgba(251,146,60,.38)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,color:"#fb923c",flexShrink:0,marginTop:1}}>{i+1}</div>
+                    <div style={{fontSize:11,color:"#cbd5e1",lineHeight:1.5}}>{txt}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {s.action&&(
+              <button onClick={()=>window.open(s.action.url,"_blank")} style={{marginTop:9,width:"100%",padding:"7px",borderRadius:8,background:"rgba(251,146,60,.1)",border:"1px solid rgba(251,146,60,.28)",color:"#fb923c",fontSize:11,cursor:"pointer"}}>
+                {"↗ "+s.action.label}
+              </button>
+            )}
+            <div style={{marginTop:7,fontSize:9,color:"#475569",fontStyle:"italic",lineHeight:1.5}}>{"💡 "+s.hint}</div>
+          </div>
+
+          <div style={{display:"flex",gap:7,marginBottom:step===5?11:0}}>
+            {step>0&&<button onClick={()=>setStep(step-1)} style={{flex:1,padding:"7px",borderRadius:8,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",color:"#64748b",fontSize:11,cursor:"pointer"}}>{"\u2190 Назад"}</button>}
+            {step<5&&<button onClick={()=>setStep(step+1)} style={{flex:2,padding:"7px",borderRadius:8,background:"rgba(251,146,60,.1)",border:"1px solid rgba(251,146,60,.28)",color:"#fb923c",fontSize:11,cursor:"pointer"}}>{"Далі \u2192"}</button>}
+          </div>
+
+          {step===5&&(
+            <div>
+              <textarea
+                rows={6}
+                placeholder={"Встав сюди об'єкт firebaseConfig:\n{\n  \"apiKey\": \"AIza...\",\n  \"authDomain\": \"xxx.firebaseapp.com\",\n  \"databaseURL\": \"https://xxx-default-rtdb.firebaseio.com\",\n  \"projectId\": \"xxx\",\n  \"storageBucket\": \"xxx.appspot.com\",\n  \"messagingSenderId\": \"000\",\n  \"appId\": \"1:000:web:000\"\n}"}
+                value={fbCfg}
+                onChange={e=>setFbCfg(e.target.value)}
+                style={{resize:"vertical",fontFamily:"monospace",fontSize:10,marginBottom:8,minHeight:130}}
+              />
+              {fbStatus==="ok"&&<div style={{padding:"8px 10px",borderRadius:8,background:"rgba(74,222,128,.08)",border:"1px solid rgba(74,222,128,.22)",fontSize:11,color:"#4ade80",marginBottom:8}}>{"🎉 Firebase підключено! Дані синхронізуються між усіма пристроями."}</div>}
+              {fbStatus==="local"&&<div style={{padding:"8px 10px",borderRadius:8,background:"rgba(251,191,36,.07)",border:"1px solid rgba(251,191,36,.2)",fontSize:11,color:"#fbbf24",marginBottom:8}}>{"💾 Firebase не вказано — дані зберігаються лише локально."}</div>}
+              {fbStatus&&fbStatus!=="ok"&&fbStatus!=="local"&&fbStatus!=="err"&&<div style={{padding:"8px 10px",borderRadius:8,background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.2)",fontSize:11,color:"#f87171",marginBottom:8}}>{fbStatus}</div>}
+              {fbStatus==="err"&&<div style={{padding:"8px 10px",borderRadius:8,background:"rgba(239,68,68,.07)",border:"1px solid rgba(239,68,68,.2)",fontSize:11,color:"#f87171",marginBottom:8}}>{"Помилка ініціалізації Firebase. Перевір конфіг."}</div>}
+            </div>
+          )}
+        </div>
+
+        <div style={{marginBottom:14,background:"rgba(255,255,255,.03)",borderRadius:10,padding:"9px 12px"}}>
+          <div style={{fontSize:9,color:"#475569",marginBottom:3}}>Твій User ID (для переносу даних між пристроями):</div>
+          <div style={{fontFamily:"monospace",fontSize:10,color:"#38bdf8",wordBreak:"break-all"}}>{store._userId}</div>
+          <div style={{fontSize:9,color:"#334155",marginTop:2,lineHeight:1.5}}>DevTools (F12) → Application → Local Storage → додай fd_user_id з цим значенням на новому пристрої.</div>
+        </div>
+
+        <button onClick={save} style={{width:"100%",padding:12,borderRadius:11,background:saved?"rgba(74,222,128,.14)":"linear-gradient(135deg,rgba(14,116,144,.42),rgba(30,58,138,.42))",border:"1px solid "+(saved?"rgba(74,222,128,.38)":"rgba(56,189,248,.33)"),color:saved?"#4ade80":"#38bdf8",fontSize:14,cursor:"pointer",transition:"all .3s"}}>
+          {saved?"✓ Збережено!":"Зберегти налаштування"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 function App() {
   const [tab, setTab]             = useState("plan");
   const [phase, setPhase]         = useState(1);
@@ -517,11 +758,19 @@ function App() {
   const [splash, setSplash]       = useState({active:false,x:0,y:0,color:"#38bdf8"});
   const [showIntro, setShowIntro] = useState(true);
   const [loaded, setLoaded]       = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [fbReady, setFbReady]     = useState(false);
   const [histView, setHistView]   = useState("table"); // "table" | "chart" for Статика
   const timerRef  = useRef(null);
   const startRef  = useRef(null);
   const audioRef  = useRef(null);
   const fileRef   = useRef(null);
+
+  // Init Firebase on mount
+  useEffect(() => {
+    var cfg = getFirebaseCfg();
+    if (cfg) { var ok = initFirebase(cfg); if(ok) setFbReady(ok); }
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -724,6 +973,7 @@ function App() {
       `}</style>
 
       {showIntro && <DropIntro onDone={() => setShowIntro(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)}/>}
       <CrownSplash active={splash.active} color={splash.color} x={splash.x} y={splash.y} />
 
       {[...Array(10)].map((_,i) => (
@@ -779,13 +1029,17 @@ function App() {
         {/* Header */}
         <div style={{padding:"22px 16px 12px",textAlign:"center"}}>
           <div style={{fontSize:9,letterSpacing:4,color:"#38bdf8",textTransform:"uppercase",marginBottom:4}}>Freediving Tracker</div>
+          <div style={{position:"relative"}}>
+          <button onClick={()=>setShowSettings(true)} title="Налаштування" style={{position:"absolute",right:0,top:0,background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:8,color:"#475569",fontSize:15,cursor:"pointer",padding:"3px 8px",lineHeight:1}}>⚙️</button>
           <h1 style={{margin:0,fontSize:21,fontWeight:"normal",color:"#f0f9ff"}}>Станіслав Гойсан</h1>
+        </div>
           <div style={{fontSize:10,color:"#475569",marginTop:3}}>Басейн 25м · Щосуботи 12:00 · 3.8м</div>
           <div style={{marginTop:11,background:"rgba(255,255,255,.04)",borderRadius:100,height:4,overflow:"hidden"}}>
             <div style={{height:"100%",width:`${(doneCount/12)*100}%`,background:"linear-gradient(90deg,#0ea5e9,#38bdf8,#7dd3fc)",borderRadius:100,transition:"width .5s",boxShadow:"0 0 10px rgba(56,189,248,.4)"}}/>
           </div>
           <div style={{marginTop:3,fontSize:10,color:"#475569"}}>{doneCount}/12 тренувань · Рекорд статики: {best>0?fmt(best):"—"}</div>
-        </div>
+
+          {!_fbDb && <div style={{fontSize:8,color:"#64748b",marginTop:2,cursor:"pointer"}} onClick={()=>setShowSettings(true)}>⚙️ Налаштуй Firebase або API ключ</div>}        </div>
 
         {/* Tabs */}
         <div style={{display:"flex",gap:2,margin:"0 14px 14px",background:"rgba(255,255,255,.03)",borderRadius:13,padding:3,border:"1px solid rgba(255,255,255,.06)"}}>
