@@ -1,0 +1,2142 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<title>Freediving Tracker — Станіслав</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f4c75 50%, #3282b8 75%, #bbe1fa 100%);
+  font-family: 
+'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #e2e8f0;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Freediving background effects */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: 
+    radial-gradient(ellipse at 20% 30%, rgba(14, 116, 144, 0.15) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 70%, rgba(30, 58, 138, 0.12) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 90%, rgba(56, 189, 248, 0.08) 0%, transparent 40%);
+  z-index: -2;
+  pointer-events: none;
+}
+
+/* Water bubbles animation */
+.water-bubble {
+  position: fixed;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  animation: bubble-rise 8s ease-in infinite;
+  z-index: -1;
+  pointer-events: none;
+}
+
+@keyframes bubble-rise {
+  0% { transform: translateY(100vh) scale(0.5); opacity: 0.3; }
+  50% { opacity: 0.6; }
+  100% { transform: translateY(-20vh) scale(1.2); opacity: 0; }
+}
+
+/* Blur effect for login modal */
+.blur-background {
+  filter: blur(8px);
+  transition: filter 0.3s ease;
+}
+
+/* Login Modal Styles */
+.login-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(12px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10000;
+  animation: fadeIn 0.5s ease;
+}
+
+.login-content {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 24px;
+  padding: 2.5rem 2rem;
+  text-align: center;
+  max-width: 420px;
+  width: 90%;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+  position: relative;
+  overflow: hidden;
+}
+
+.login-content::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.1) 0%, transparent 70%);
+  animation: wave 6s ease-in-out infinite;
+  z-index: -1;
+}
+
+@keyframes wave {
+  0%, 100% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.1); }
+}
+
+.freediving-icon {
+  width: 100px;
+  height: 100px;
+  margin: 0 auto 1.5rem;
+  background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  box-shadow: 0 15px 35px rgba(56, 189, 248, 0.3);
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.login-header h1 {
+  font-size: 2.2rem;
+  margin-bottom: 0.5rem;
+  font-weight: 300;
+  color: #f0f9ff;
+  text-shadow: 0 2px 10px rgba(56, 189, 248, 0.3);
+}
+
+.login-header p {
+  color: #94a3b8;
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+}
+
+.google-signin-btn {
+  background: linear-gradient(135deg, #4285f4, #34a853);
+  border: none;
+  color: white;
+  padding: 16px 32px;
+  border-radius: 50px;
+  font-size: 1.1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items
+: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  box-shadow: 0 8px 25px rgba(66, 133, 244, 0.3);
+}
+
+.google-signin-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 35px rgba(66, 133, 244, 0.4);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .login-content {
+    padding: 2rem 1.5rem;
+    margin: 1rem;
+  }
+  
+  .freediving-icon {
+    width: 80px;
+    height: 80px;
+    font-size: 2.5rem;
+  }
+  
+  .login-header h1 {
+    font-size: 1.8rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-content {
+    padding: 1.5rem 1rem;
+  }
+  
+  .google-signin-btn {
+    padding: 14px 24px;
+    font-size: 1rem;
+  }
+}
+
+/* Main app responsive improvements */
+.app-container {
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 1rem;
+  min-height: 100vh;
+  display: none;
+}
+
+.app-container.authenticated {
+  display: block;
+}
+
+@media (min-width: 768px) {
+  .app-container {
+    max-width: 480px;
+    padding: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-container {
+    max-width: 600px;
+    padding: 2rem;
+  }
+}
+
+/* Achievement popup improvements - WCAG 2.2 compliant */
+.achievement-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(15, 23, 42, 0.98);
+  border: 2px solid rgba(251, 191, 36, 0.5);
+  border-radius: 20px;
+  padding: 2rem;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  z-index: 9999;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.7);
+  animation: popupSlideIn 0.4s ease;
+}
+
+@keyframes popupSlideIn {
+  0% { 
+    opacity: 0; 
+    transform: translate(-50%, -50%) scale(0.8); 
+  }
+  100% { 
+    opacity: 1; 
+    transform: translate(-50%, -50%) scale(1); 
+  }
+}
+
+.achievement-popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(8px);
+  z-index: 9998;
+}
+
+.achievement-popup h3 {
+  color: #fbbf24;
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.achievement-popup p {
+  color: #e2e8f0;
+  font-size: 1.1rem;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.achievement-popup .close-btn {
+  background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+  border: none;
+  color: white;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-size: 1rem;
+  cursor: pointer;
+  display: block;
+  margin: 0 auto;
+  transition: all 0.3s ease;
+}
+
+.achievement-popup .close-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(56, 189, 248, 0.4);
+}
+
+/* Improved contrast for better readability */
+.achievement-popup .close-btn:focus {
+  outline: 3px solid #fbbf24;
+  outline-offset: 2px;
+}
+
+/* Settings modal improvements */
+.settings-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 8000;
+  padding: 1rem;
+}
+
+.settings-content {
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.95) 0%, rgba(30, 41, 59, 0.95) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 20px;
+  padding: 2rem;
+  max-width: 500px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: slideUp 0.4s ease;
+}
+
+@keyframes slideUp {
+  0% { 
+    opacity: 0; 
+    transform: translateY(50px);
+ 
+  }
+  100% { 
+    opacity: 1; 
+    transform: translateY(0); 
+  }
+}
+
+.logout-btn {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  border: none;
+  color: white;
+  padding: 12px 24px;
+  border-radius: 12px;
+  font-size: 1rem;
+  cursor: pointer;
+  width: 100%;
+  margin-top: 1rem;
+  transition: all 0.3s ease;
+}
+
+.logout-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(239, 68, 68, 0.4);
+}
+
+/* Enhanced animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes crownDrop{0%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(0);opacity:1}60%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(var(--dist))}100%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(calc(var(--dist) + 10px)) scale(.3);opacity:0}}
+@keyframes rippleRing{0%{width:0;height:0;opacity:.8}100%{width:90px;height:28px;opacity:0}}
+@keyframes dropFall{0%{transform:translateY(-200px) scaleX(.85);opacity:0}20%{opacity:1}70%{transform:translateY(0) scaleX(.9)}82%{transform:translateY(10px) scaleX(1.35) scaleY(.18);opacity:.8}100%{transform:translateY(10px) scaleX(1.6) scaleY(0);opacity:0}}
+@keyframes introRipple{0%{width:4px;height:4px;opacity:.9}100%{width:150px;height:46px;opacity:0}}
+@keyframes introDone{0%{opacity:1}100%{opacity:0;pointer-events:none}}
+@keyframes rise{0%{transform:translateY(0);opacity:.5}100%{transform:translateY(-110vh);opacity:0}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(56,189,248,.4)}50%{box-shadow:0 0 0 16px rgba(56,189,248,0)}}
+@keyframes pulseRed{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}50%{box-shadow:0 0 0 14px rgba(239,68,68,0)}}
+@keyframes glow{0%,100%{text-shadow:0 0 20px rgba(56,189,248,.3)}50%{text-shadow:0 0 40px rgba(56,189,248,.9)}}
+@keyframes achIn{0%{transform:translateX(110%);opacity:0}12%{transform:translateX(0);opacity:1}88%{transform:translateX(0);opacity:1}100%{transform:translateX(110%);opacity:0}}
+@keyframes pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.06)}100%{transform:scale(1);opacity:1}}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+input,textarea{
+  background:rgba(255,255,255,.08);
+  border:2px solid rgba(56,189,248,.2);
+  color:#e2e8f0;
+  border-radius:12px;
+  padding:12px 16px;
+  width:100%;
+  font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size:14px;
+  transition: all 0.3s ease;
+}
+
+input:focus,textarea:focus
+{
+  outline:none;
+  border-color:rgba(56,189,248,.6);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.1);
+}
+
+.wbtn{transition:all .18s;cursor:pointer}
+.wbtn:hover{transform:scale(1.04)}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-thumb{background:rgba(56,189,248,.4);border-radius:6px}
+::-webkit-scrollbar-track{background:rgba(0,0,0,.1)}
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// --- FIREBASE CONFIG ---
+const FIREBASE_CONFIG = {
+    "apiKey": "AIzaSyBB5vavbOrb5dL890_5dP1IlGtR4O6b4lE",
+    "authDomain": "freediving-tracker-20da0.firebaseapp.com",
+    "databaseURL": "https://freediving-tracker-20da0-default-rtdb.europe-west1.firebasedatabase.app",
+    "projectId": "freediving-tracker-20da0",
+    "storageBucket": "freediving-tracker-20da0.firebasestorage.app",
+    "messagingSenderId": "760148639764",
+    "appId": "1:760148639764:web:a00f911f984d9282a5a701"
+  };
+
+// ─── AUTHENTICATION ──────────────────────────────────────────────────────────
+let auth = null;
+let currentUser = null;
+
+// Initialize Firebase Auth
+function initAuth() {
+  if (typeof firebase !== "undefined" && firebase.auth) {
+    auth = firebase.auth();
+    
+    // Configure Google provider
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.addScope('profile');
+    provider.addScope('email');
+    
+    return auth;
+  }
+  return null;
+}
+
+// Google Sign In
+async function signInWithGoogle() {
+  try {
+    if (!auth) {
+      // Спробуємо ініціалізувати auth
+      const cfg = getFirebaseCfg();
+      if (cfg) {
+        initFirebase(cfg);
+      }
+      if (!auth) {
+        throw new Error("Firebase Auth не ініціалізований");
+      }
+    }
+    
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.addScope('profile');
+    provider.addScope('email');
+    
+    const result = await auth.signInWithPopup(provider);
+    return result.user;
+  } catch (error) {
+    console.error('Google sign in error:', error);
+    throw error;
+  }
+}
+
+// Sign out
+async function signOut() {
+  if (!auth) return;
+  
+  try {
+    await auth.signOut();
+    // Clear local storage
+    localStorage.removeItem("fd_user_id");
+    // Reload page to reset state
+    window.location.reload();
+  } catch (error) {
+    console.error('Sign out error:', error);
+  }
+}
+
+// ─── FIT PARSER ──────────────────────────────────────────────────────────────
+const FIT_EPOCH = 631065600;
+function parseFitFile(buffer) {
+  try {
+    const b = new Uint8Array(buffer), v = new DataView(buffer);
+    if (b.length < 14) return null;
+    const hSize = b[0];
+    if (String.fromCharCode(b[8],b[9],b[10],b[11]) !== '.FIT') return null;
+    const dataSize = v.getUint32(4, true);
+    const end = Math.min(hSize + dataSize, b.length - 2);
+    let off = hSize, defs = {}, pts = [], maxHR=0, minHR=255, sumHR=0, nHR=0;
+    while (off < end) {
+      if (off >= b.length) break;
+      const h = b[off++];
+      if (h & 0x80) continue;
+      const isDef = !!(h & 0x40), hasDev = !!(h & 0x20), lt = h & 0x0F;
+      if (isDef) {
+        if (off+5 > b.length) break;
+        off++;
+        const le = b[off++] === 0;
+        const mn = le ? v.getUint16(off,true) : v.getUint16(off,false); off+=2;
+        const nf = b[off++];
+        const fields = [];
+        for (let i=0; i<nf && off+3<=b.length; i++) { fields.push({n:b[off],sz:b[off+1]}); off+=3; }
+        if (hasDev && off
+<b.length) { const nd=b[off++]; off+=nd*3; }
+        defs[lt] = {mn, fields, le};
+      } else {
+        const d = defs[lt]; if (!d) break;
+        const sz = d.fields.reduce((a,f) => a+f.sz, 0);
+        if (off+sz > b.length) break;
+        const msg = {}; let fo = off;
+        for (const f of d.fields) {
+          try {
+            if(f.sz===1) msg[f.n]=b[fo];
+            else if(f.sz===2) msg[f.n]=d.le?v.getUint16(fo,true):v.getUint16(fo,false);
+            else if(f.sz===4) msg[f.n]=d.le?v.getUint32(fo,true):v.getUint32(fo,false);
+          } catch(e) {}
+          fo += f.sz;
+        }
+        off = fo;
+        if (d.mn === 20) {
+          const hr=msg[3], ts=msg[253];
+          if (hr && hr>0 && hr<250 && ts) {
+            pts.push({t:ts+FIT_EPOCH, hr});
+            sumHR+=hr; nHR++;
+            if(hr>maxHR) maxHR=hr;
+            if(hr<minHR) minHR=hr;
+          }
+        }
+      }
+    }
+    if (pts.length>0) { const t0=pts[0].t; pts.forEach(p => p.el=p.t-t0); }
+    return { pts, stats: { avg:nHR?Math.round(sumHR/nHR):0, max:maxHR<250?maxHR:0, min:minHR<250&&minHR>0?minHR:0, dur:pts.length>1?Math.round(pts[pts.length-1].el/60):0, n:nHR }};
+  } catch(e) { return null; }
+}
+
+// ─── DATA ────────────────────────────────────────────────────────────────────
+const PHASES = [
+  {id:1, name:"Фаза 1", subtitle:"Відновлення", color:"#4ade80", rgb:"74,222,128",  weeks:[1,2,3,4]},
+  {id:2, name:"Фаза 2", subtitle:"Розвиток",    color:"#38bdf8", rgb:"56,189,248",  weeks:[5,6,7,8]},
+  {id:3, name:"Фаза 3", subtitle:"Прогрес",     color:"#a78bfa", rgb:"167,139,250", weeks:[9,10,11,12]}
+];
+const BASE_PLANS = {
+  1:{phase:1,goals:{s:"1.5 хв",d:"4×25м DNF",g:"4 спуски"},tip:"Перше заняття після перерви. Ніякого форсування.",blocks:[{n:"Розминка",t:"10хв",d:"6×25м спокійний кроль, розтяжка, діафрагмальне дихання."},{n:"Статика на поверхні",t:"15 хв",d:"4 підходи × 1.5 хв. Відпочинок 3 хв між підходами."},{n:"Динаміка без ласт (DNF)",t:"20 хв",d:"4×25м без ласт. Темп повільний. Відпочинок 4 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски до 3.8м і одразу вгору. Продувка кожні 50см. Відпочинок 3 хв."},{n:"Заминка",t:"5 хв",d:"2×25м спокійне плавання. Дихання на бортику."}]},
+  2:{phase:1,goals:{s:"2 хв",d:"4×25м DNF",g:"4 спуски, 10-15 сек"},tip:"Практикуй Френзель щодня 5 хвилин.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль, розтяжка."},{n:"Статика на поверхні",t:"15 хв",d:"4 підходи × 2 хв. Відпочинок 3 хв."},{n:"Динаміка без ласт (DNF)",t:"20 хв",d:"4×25м без ласт. Відпочинок 4 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски — 10-15 сек на дні. Відпочинок 3 хв."},{n:"Заминка",t:"5 хв",d:"2×25м спокійне плавання."}]},
+  3:{phase:1,goals:{s:"2.5 хв",d:"4×25м або 1×50м DNF",g:"4 спуски, 20-30 сек"},tip:"50м — тільки якщо свіжий і пульс < 90.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль, розтяжка."},{n:"Статика на поверхні",t:"15 хв",d:"4 підходи × 2-2.5 хв. Відпочинок 3 хв."},{n:"Динаміка без ласт (DNF)",t:"20 хв",d:"4×25м. Якщо легко — спробуй 50м. Відпочинок 4 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски, 20-30 сек на дні. Відпочинок 3-4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м спокійне плавання."}]},
+  4:{phase:1,goals:{s:"2.5 хв",d:"5×25м або 2×50м DNF",g:"5 спусків, 30-45 сек"},tip:"Кінець Фази 1!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"4 підходи × 2.5 хв. Відпочинок 3 хв."},{n:"Динаміка без ласт (DNF)",t:"20 хв",d:"5×25м або 2×50м. Відпочинок 4 хв."},{n:"Глибина",t:"10 хв",d:"5 спусків, 30-45 сек + горизонталь. Відпочинок 4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  5:{phase:2,goals:{s:"3 хв",d:"4×50м DYN з ластами",g:"4 спуски, 45-60 сек"},tip:"Перший раз з ластами. Рух від стегна.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3 хв. Відпочинок 3.5 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"4×50м з ластами, пояс 2кг. Відпочинок 5 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски, 45-60 сек + горизонталь. Відпочинок 4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  6:{phase:2,goals:{s:"3 хв",d:"4×50м DYN",g:"4 спуски, 45-60 сек"},tip:"Закріплення тижня 5.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3 хв. Відпочинок 3.5 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"4×50м. Відпочинок 5 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски, 45-60 сек + горизонталь. Відпочинок 4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  7:{phase:2,goals:{s:"3.5 хв",d:"3×75м або 4×50м DYN",g:"4 спуски комбо"},tip:"Перша спроба 75м!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3-3.5 хв. Відпочинок 4 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"3×75м або 4×50м. Відпочинок 5-6 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски: статика 30-45 сек + горизонталь. Відпочинок 4 хв."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  8:{phase:2,goals:{s:"3.5 хв",d:"3×75м DYN",g:"4 спуски комбо"},tip:"Кінець Фази 2. Рекорд 75м поруч!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3.5 хв. Відпочинок 4 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"3×75м. Відпочинок 6 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски комбо."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  9:{phase:3,goals:{s:"4 хв",d:"3×75м або 2×100м DYN",g:"4 спуски"},tip:"Фаза 3 — фінальний спринт!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 3.5-4 хв. Відпочинок 4 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"3×75м або 2×100м. Відпочинок 6 хв."},{n:"Глибина",t:"10 хв",d:"4 спуски вільний стиль."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  10:{phase:3,goals:{s:"4 хв",d:"2×100м DYN",g:"3 спуски"},tip:"100м легко — ти вже перевершив рекорд!",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 4 хв. Відпочинок 4 хв."},{n:"Динаміка з ластами (DYN)",t:"20 хв",d:"2×100м. Відпочинок 6 хв."},{n:"Глибина",t:"10 хв",d:"3 спуски відновлювальні."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  11:{phase:3,goals:{s:"4+ хв",d:"Спроба рекорду",g:"3 спуски"},tip:"День рекорду! Відпочинь добре.",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 4+ хв. Відпочинок 4-5 хв."},{n:"Спроба рекорду дистанції",t:"20 хв",d:"1 спроба рекорду після 5-6 хв відпочинку."},{n:"Глибина",t:"10 хв",d:"3 спуски відновлювальні."},{n:"Заминка",t:"5 хв",d:"2×25м."}]},
+  12:{phase:3,goals:{s:"4+ хв",d:"Новий рекорд",g:"3 спуски"},tip:"Фінал програми! 🎉",blocks:[{n:"Розминка",t:"10 хв",d:"6×25м кроль."},{n:"Статика на поверхні",t:"15 хв",d:"3 підходи × 4+ хв. Відпочинок 4-5 хв."},{n:"Фінальний заплив",t:"20 хв",d:"1 спроба рекорду. Святкуй кожен метр понад 75м!"},{n:"Глибина",t:"10 хв",d:"3 спуски — насолоджуйся."},{n:"Заминка",t:"5 хв",d:"2×25м."}]}
+};
+
+// ─── ACHIEVEMENTS ─────────────────────────────────────────────────────────────
+const ACH_DEFS = [
+  {id:"h45",  icon:"💧", name:"45 секунд",       desc:"≥0:45 затримки. Кожна спроба рахується",      type:"timer", thr:45},
+  {id:"h60",  icon:"⏱",  name:"Хвилина",         desc:"≥1:00 затримки. Кожна спроба рахується",      type:"timer", thr:60},
+  {id:"h90",  icon:"🌊", name:"Хвилина 30",       desc:"≥1:30 затримки. Кожна спроба рахується",      type:"timer", thr:90},
+  {id:"h120", icon:"🫁", name:"Дві хвилини",      desc:"≥2:00 затримки. Кожна спроба рахується",      type:"timer", thr:120},
+  {id:"h180", icon:"💪", name:"Три хвилини",      desc:"≥3:00 затримки. Кожна спроба рахується",      type:"timer", thr:180},
+  {id:"h240", icon:"🔥", name:"Чотири хвилини",   desc:"≥4:00 затримки. Кожна спроба рахується",      type:"timer", thr:240},
+  {id:"h300", icon:"⚡", name:"П'ять хвилин",     desc:"≥5:00 затримки. Кожна спроба рахується",      type:"timer", thr:300},
+  {id:"pb",   icon:"🏅", name:"Рекордсмен",       desc:"Кожен новий особистий рекорд статики",         type:"beat_record"},
+  {id:"sess", icon:"🏊", name:"Тиждень виконано", desc:"Кожне збережене тренування рахується",         type:"session"},
+  {id:"fit",  icon:"📊", name:"Аналітик",         desc:"Кожен завантажений FIT файл рахується",        type:"fit"},
+  {id:"plan", icon:"🤝", name:"Прийняв пораду",   desc:"Кожне прийняте рішення AI рахується",          type:"plan_accept"},
+  {id:"blks", icon:"✅", name:"Повне виконання",  desc:"Всі 5 блоків тижня відмічені як виконані",     type:"all_blocks"},
+  {id:"cons", icon:"📅", name:"Система",          desc:"3+ тижні поспіль завершені",                   type:"streak3"},
+  {id:"elite",icon:"🦈", name:"Еліта",            desc:"Всі 12 тижнів програми завершені",             type:"full_12"},
+];
+
+function getTiers(count) {
+  const t = [];
+  if (count >= 1)   t.push({e:"🥉", n:"Бронза", from:1});
+  if (count >= 11)  t.push({e:"🥈", n:"Срібло", from:11});
+  if (count >= 51)  t.push({e:"🥇", n:"Золото",  from:51});
+  if (count >= 100) t.push({e:"🏆", n:"Платина", from:100});
+  return t;
+}
+
+function nextTier(count) {
+  if (count === 0)  return {e:"🥉", need:1};
+  if (count < 11)   return {e:"🥈", need:11-count};
+  if (count < 51)   return {e:"🥇", need:51-count};
+  if (count < 100)  return {e:"🏆", need:100-count};
+  return null;
+}
+
+// ─── UTILS ────────────────────────────────────────────────────────────────────
+const fmt = s => `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`;
+const fmtDate = () => new Date().toLocaleDateString("uk-UA");
+const fmtTime = () => new Date().toLocaleTimeString("uk-UA",{hour:"2-digit",minute:"2-digit"});
+
+function beep(ctx, freq=440, dur=0.15, vol=0.3) {
+  if (!ctx) return;
+  try {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+dur);
+    o.start(); o.stop(ctx.currentTime+dur);
+  } catch(e) {}
+}
+const vib = p => { try { navigator.vibrate && navigator.vibrate(p); } catch(e) {} };
+
+// Firebase + localStorage hybrid with auth
+function getApiKey() {
+ return localStorage.getItem("claude_api_key") || ""; }
+function getFirebaseCfg() { return FIREBASE_CONFIG; }
+
+var _fbDb = null;
+
+function initFirebase(cfg) {
+  try {
+    if (typeof firebase === "undefined") {
+      console.error("Firebase SDK не завантажений");
+      return false;
+    }
+
+    // якщо вже є app — не створюємо новий
+    var app;
+    if (firebase.apps && firebase.apps.length) {
+      app = firebase.app();
+    } else {
+      app = firebase.initializeApp(cfg);
+    }
+
+    _fbDb = firebase.database(app);
+    
+    // Initialize auth
+    initAuth();
+    
+    return true;
+
+  } catch(e) {
+    console.error("FB init:", e);
+    _fbDb = null;
+    return false;
+  }
+}
+
+// User ID management with auth
+var _userId = null;
+
+function getUserId() {
+  if (currentUser) {
+    return currentUser.uid;
+  }
+  
+  // Fallback to localStorage for non-authenticated users
+  let localId = localStorage.getItem("fd_user_id");
+  if (!localId) {
+    localId = "u_" + Math.random().toString(36).slice(2,10);
+    localStorage.setItem("fd_user_id", localId);
+  }
+  return localId;
+}
+
+const store = {
+  async get(key) {
+    const userId = getUserId();
+    if (_fbDb && currentUser) {
+      try { 
+        var s = await _fbDb.ref("users/" + userId + "/" + key).get(); 
+        if (s.exists()) { 
+          localStorage.setItem("fd5_" + key, JSON.stringify(s.val())); 
+          return s.val(); 
+        } 
+      } catch(e) {}
+    }
+    try { 
+      var v = localStorage.getItem("fd5_" + key); 
+      return v ? JSON.parse(v) : null; 
+    } catch(e) { 
+      return null; 
+    }
+  },
+  async set(key, val) {
+    const userId = getUserId();
+    try { 
+      localStorage.setItem("fd5_" + key, JSON.stringify(val)); 
+    } catch(e) {}
+    if (_fbDb && currentUser) { 
+      try { 
+        await _fbDb.ref("users/" + userId + "/" + key).set(val); 
+      } catch(e) {} 
+    }
+  },
+  sub(key, cb) {
+    const userId = getUserId();
+    if (!_fbDb || !currentUser) return function(){};
+    var ref = _fbDb.ref("users/" + userId + "/" + key);
+    ref.on("value", function(s){ if(s.exists()) cb(s.val()); });
+    return function(){ ref.off("value"); };
+  }
+};
+
+// ─── AI ANALYSIS ──────────────────────────────────────────────────────────────
+async function runAIAnalysis(payload) {
+  var apiKey = getApiKey();
+  if (!apiKey) throw new Error("API ключ не налаштований. Відкрий налаштування (⚙️) та введи свій Anthropic API ключ.");
+  const { week, session, fitStats, planBlocks, planGoals, blockNotes, timerRecords, allSessions } = payload;
+  const fitInfo = fitStats
+    ? "\nFIT: avg HR=" + fitStats.avg + ", max HR=" + fitStats.max + ", min HR=" + fitStats.min + ", тривалість=" + fitStats.dur + " хв"
+    : "";
+  const notesInfo = Object.entries(blockNotes)
+    .filter(([k]) => k.startsWith(week + "_n"))
+    .map(([k,v]) => "  Блок " + (parseInt(k.split("_")[1])+1) + ': "' + v + '"')
+    .join("\n");
+  const prevTxt = Object.entries(allSessions)
+    .map(([w,s]) => "Тиждень " + w + ": статика=" + (s.staticTime||"?") + ", HR avg=" + (s.avgHR||"?") + ", самопочуття=" + (s.feeling||"?"))
+    .join("\n");
+  const bestSec = timerRecords.length ? Math.max(...timerRecords.map(r=>r.s)) : 0;
+  const bestStr = bestSec > 0 ? fmt(bestSec) : "немає";
+
+  const promptText = [
+    "Тиждень " + week + " з 12.",
+    "Цілі плану: статика=" + planGoals.s + ", динаміка=" + planGoals.d + ", глибина=" + planGoals.g,
+    "Блоки: " + planBlocks.map((b,i) => (i+1)+". "+b.n).join(", "),
+    "",
+    "Фактичні результати:",
+    "Статика: " + (session.staticTime||"не вказано"),
+    "Динаміка: " + (session.dynamicDist||"не вказано"),
+    "Avg HR: " + (session.avgHR||"не вказано") + ", Max HR: " + (session.maxHR||"не вказано"),
+    "Самопочуття: " + (session.feeling||"не вказано"),
+    "Нотатки: " + (session.notes||"немає"),
+    fitInfo,
+    "",
+    "Нотатки до блоків:",
+    notesInfo || "немає",
+    "",
+    "Рекорд статики таймера: " + bestStr,
+    "",
+    "Попередні тижні:",
+    prevTxt || "перше тренування",
+    "",
+    "ЗАВДАННЯ: Ти — Jan Claude One Damn, особистий AI-тренер Станіслава.",
+    "Проаналізуй: 1) виконання плану 2) HR 3) нотатки 4) загальний прогрес.",
+    "",
+    "Поверни ТІЛЬКИ валідний JSON без жодного тексту навколо:",
+    '{"analysis":"текст 150-250 слів","verdict":"good","suggestions":[{"targetWeek":5,"blockIndex":1,"field":"d","original":"текст","proposed":"текст","reason":"причина"}],"goalSuggestions":[{"targetWeek":5,"field":"s","original":"3 хв","proposed":"2.5 хв","reason":"причина"}]}',
+    "",
+    'verdict може бути: "good", "warning", "critical".',
+    "Якщо план не потребує змін — suggestions та goalSuggestions = порожні масиви [].",
+    "Пропонуй зміни ТІЛЬКИ якщо є реальні проблеми: дуже важко, дуже високий HR, провалено ключові блоки."
+  ].join("\n");
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true" },
+    body: JSON.stringify({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 1000,
+      system: "Ти — Jan Claude One Damn, персональний AI-тренер фрідайвінгу для Станіслава Гойсана (29 р., колишній плавець 1 розряду, рекорд динаміки 75м, пролапс МК 1 ст.). Відповідай ВИКЛЮЧНО українською. Повертай ТІЛЬКИ валідний JSON без будь-якого іншого тексту, без markdown.",
+      messages: [{ role:"user", content: promptText }]
+    })
+  });
+  if (!resp.ok) {
+    var errBody = await resp.text();
+    throw new Error("API " + resp.status + ": " + errBody.slice(0,300));
+  }
+  const data = await resp.json();
+  const raw = (data.content||[]).map(c => c.text||"").join("");
+  const clean = raw.replace(/\`\`\`json|\`\`\`/g,"").trim();
+  return JSON.parse(clean);
+}
+
+// ─── WATER ANIMATIONS ─────────────────────────────────────────────────────────
+function CrownSplash({ active, color, x, y }) {
+  if (!active) return null;
+  return (
+    <div style={{position:"fixed",left:x,top:y,pointerEvents:"none",zIndex:9999,transform:"translate(-50%,-50%)"}}>
+      {[...Array(10)].map((_,i) => {
+        const angle = (i/10)*360;
+        const dist = 28 + (i%2)*10;
+        return (
+          <div key={i} style={{
+            position:"absolute", left:"50%", top:"50%",
+            width:7, height:9,
+            background: color || "#38bdf8",
+            borderRadius:"50% 50% 50% 50% / 40% 40% 60% 60%",
+            transformOrigin:"center bottom",
+            animation:"crownDrop 0.6s cubic-bezier(.2,.8,.4,1) forwards",
+            animationDelay: i*0.01 + "s",
+            "--a": angle + "deg",
+            "--dist": "-" + dist + "px",
+          }}/>
+        );
+      })}
+      {[0,1,2].map(i => (
+        <div key={i} style={{
+          position:"absolute", left:"50%", top:"50%",
+          border: "2px solid " + (color||"#38bdf8"),
+          borderRadius:"50%", transform:"translate(-50%,-50%)",
+          animation:"rippleRing 0.65s ease-out forwards",
+          animationDelay: i*0.13 + "s", opacity:0
+        }}/>
+      ))}
+    </div>
+  );
+}
+
+function DropIntro({ onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 1900); return () => clearTimeout(t); }, []);
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:10000,background:"linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f4c75 100%)",display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+      <div style={{animation:"dropFall 1s cubic-bezier(.4,0,.6,1) forwards", opacity:0}}>
+        <svg width="64" height="80" viewBox="0 0 48 64">
+          <defs>
+            <linearGradient id="dg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#7dd3fc"/><stop offset="100%" stopColor="#0ea5e9"/>
+            </linearGradient>
+            <radialGradient id="dh" cx="35%" cy="30%">
+              <stop offset="0%" stopColor="white" stopOpacity="0.6"/>
+              <stop offset="100%" stopColor="white" stopOpacity="0"/>
+            </radialGradient>
+          </defs>
+          <path d="M24 2 C24 2 4 28 4 40 C4 52 13 62 24 62 C35 62 44 52 44 40 C44 28 24 2 24 2Z" fill="url(#dg)"/>
+          <ellipse cx="17" cy="28" rx="6" ry="10" fill="url(#dh)"/>
+        </svg>
+      </div>
+      {[0,1,2].map(i => (
+        <div key={i} style={{
+          position:"absolute", left:"50%", top:"50%",
+          border:"3px solid #38bdf8", borderRadius:"50%",
+          transform:"translate(-50%,-50%)",
+          animation:"introRipple 0.8s ease-out forwards",
+          animationDelay: (0.92 + i*0.18) + "s", opacity:0
+        }}/>
+      ))}
+      <div style={{position:"absolute",inset:0,background:"linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f4c75 100%)",animation:"introDone .5s ease-in 1.5s forwards",opacity:1}}/>
+    </div>
+  );
+}
+
+// ─── CHARTS ───────────────────────────────────────────────────────────────────
+function HRChart({ pts, color }) {
+  if (!pts || pts.length < 2) return null;
+  const c = color || "#38bdf8";
+  const W=320, H=80, pad=28;
+  const maxT = pts[pts.length-1].el || 1;
+  const hrs = pts.map(p => p.hr);
+  const minH = Math.min(...hrs)-5, maxH = Math.max(...hrs)+5;
+  const sx = t => pad + (t/maxT)*(W-pad*2);
+  const sy = h => H-pad - ((h-minH)
+/(maxH-minH))*(H-pad*1.5);
+  const linePath = pts.map((p,i) => (i===0?"M":"L") + sx(p.el).toFixed(1) + "," + sy(p.hr).toFixed(1)).join(" ");
+  const fillPath = linePath + " L" + sx(maxT).toFixed(1) + "," + (H-4) + " L" + sx(0).toFixed(1) + "," + (H-4) + " Z";
+  const steps = Math.max(1, Math.floor(maxT/60/4));
+  const xTicks = [];
+  for (let m=0; m*60<=maxT; m+=steps) xTicks.push(m);
+  return (
+    <svg width="100%" viewBox={"0 0 " + W + " " + H} style={{display:"block"}}>
+      <defs>
+        <linearGradient id={"hg"+c.replace("#","")} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={c} stopOpacity="0.3"/>
+          <stop offset="100%" stopColor={c} stopOpacity="0.02"/>
+        </linearGradient>
+      </defs>
+      {[80,100,120].map(h => (
+        <g key={h}>
+          <line x1={pad} y1={sy(h)} x2={W-pad} y2={sy(h)} stroke="rgba(255,255,255,.06)" strokeWidth="1"/>
+          <text x={pad-3} y={sy(h)+4} textAnchor="end" fill="#475569" fontSize="8">{h}</text>
+        </g>
+      ))}
+      {minH<=85 && 85<=maxH && (
+        <line x1={pad} y1={sy(85)} x2={W-pad} y2={sy(85)} stroke="#4ade80" strokeWidth="1" strokeDasharray="4,3" opacity="0.5"/>
+      )}
+      {xTicks.map(m => (
+        <text key={m} x={sx(m*60)} y={H-2} textAnchor="middle" fill="#475569" fontSize="8">{m}м</text>
+      ))}
+      <path d={fillPath} fill={"url(#hg"+c.replace("#","")+")"} />
+      <path d={linePath} fill="none" stroke={c} strokeWidth="1.5" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// History line chart for timer records
+function StaticHistoryChart({ records }) {
+  if (!records || records.length < 2) return null;
+  const pts = [...records].reverse(); // chronological
+  const W=320, H=90, padL=36, padB=20, padR=12, padT=8;
+  const vals = pts.map(p => p.s);
+  const minV = Math.max(0, Math.min(...vals) - 10);
+  const maxV = Math.max(...vals) + 10;
+  const sx = i => padL + (i/(pts.length-1))*(W-padL-padR);
+  const sy = v => padT + (1-(v-minV)/(maxV-minV))*(H-padT-padB);
+  const linePath = pts.map((p,i) => (i===0?"M":"L") + sx(i).toFixed(1) + "," + sy(p.s).toFixed(1)).join(" ");
+  const fillPath = linePath + " L" + sx(pts.length-1).toFixed(1) + "," + (H-padB) + " L" + sx(0).toFixed(1) + "," + (H-padB) + " Z";
+  const yTicks = [60,120,180,240,300].filter(v => v>=minV && v<=maxV);
+  return (
+    <svg width="100%" viewBox={"0 0 "+W+" "+H} style={{display:"block"}}>
+      <defs>
+        <linearGradient id="shg" x1="0" y1="0" x2="0" y2="1">
+          
+<stop offset="0%" stopColor="#38bdf8" stopOpacity="0.35"/>
+          <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.02"/>
+        </linearGradient>
+      </defs>
+      {yTicks.map(v => (
+        <g key={v}>
+          <line x1={padL} y1={sy(v)} x2={W-padR} y2={sy(v)} stroke="rgba(255,255,255,.06)" strokeWidth="1"/>
+          <text x={padL-3} y={sy(v)+4} textAnchor="end" fill="#475569" fontSize="8">{fmt(v)}</text>
+        </g>
+      ))}
+      <path d={fillPath} fill="url(#shg)"/>
+      <path d={linePath} fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinejoin="round"/>
+      {pts.map((p,i) => (
+        <circle key={i} cx={sx(i)} cy={sy(p.s)} r={p.rec ? 5 : 3}
+          fill={p.rec ? "#fbbf24" : "#38bdf8"}
+          stroke={p.rec ? "#92400e" : "#0ea5e9"}
+          strokeWidth="1.5"/>
+      ))}
+      {pts.length <= 10 && pts.map((p,i) => (
+        <text key={i} x={sx(i)} y={sy(p.s)-8} textAnchor="middle" fill={p.rec?"#fbbf24":"#94a3b8"} fontSize="8">{fmt(p.s)}</text>
+      ))}
+    </svg>
+  );
+}
+
+// Progress line chart for sessions (static time per week)
+function SessionHistoryChart({ sessions }) {
+  const completed = [...Array(12)].map((_,i) => ({w:i+1, s:sessions[i+1]})).filter(x => x.s?.completed && x.s.staticTime);
+  if (completed.length < 2) return null;
+  const parseTime = str => {
+    if (!str) return 0;
+    const m = str.match(/(\d+)[:\.](\d+)/);
+    return m ? parseInt(m[1])*60+parseInt(m[2]) : 0;
+  };
+  const pts = completed.map(x => ({ w:x.w, s:parseTime(x.s.staticTime), label:x.s.staticTime }));
+  const W=320, H=90, padL=36, padB=20, padR=12, padT=8;
+  const vals = pts.map(p=>p.s).filter(v=>v>0);
+  if (vals.length < 2) return null;
+  const minV = Math.max(0, Math.min(...vals)-15), maxV = Math.max(...vals)+15;
+  const sx = i => padL + (i/(pts.length-1))*(W-padL-padR);
+  const sy = v => padT + (1-(v-minV)/(maxV-minV))*(H-padT-padB);
+  const validPts = pts.filter(p=>p.s>0);
+  const linePath = validPts.map((p,i) => (i===0?"M":"L") + sx(i).toFixed(1) + "," + sy(p.s).toFixed(1)).join(" ");
+  const fillPath = linePath + " L" + sx(validPts.length-1).toFixed(1) + "," + (H-padB) + " L" + sx(0).toFixed(1) + "," + (H-padB) + " Z";
+  return (
+    <svg width="100%" viewBox={"0 0 "+W+" "+H} style={{display:"block"}}>
+      <defs>
+        <linearGradient id="seg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#4ade80" stopOpacity="0.3"/>
+          <stop offset="100%" stopColor="#4ade80" stopOpacity="0.02"/>
+        </linearGradient>
+      </defs>
+      <path d={fillPath} fill="url(#seg)"/>
+      <path d={linePath} fill="none" stroke="#4ade80" strokeWidth="2" strokeLinejoin="round"/>
+      {validPts.map((p,i) => (
+        <g key={i}>
+          <circle cx={sx(i)} cy={sy(p.s)} r="3.5" fill="#4ade80" stroke="#166534" strokeWidth="1.5"/>
+          <text x={sx(i)} y={H-padB+12} textAnchor="middle" fill="#475569" fontSize="8">T{p.w}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+// ─── ACHIEVEMENT BADGE ────────────────────────────────────────────────────────
+function AchBadge({ def, count, onShowDetails }) {
+  const tiers = getTiers(count);
+  const next = nextTier(count);
+  const earned = count > 0;
+
+  
+  return (
+    <div
+      onClick={() => onShowDetails && onShowDetails(def, count)}
+      style={{
+        background: earned?"rgba(251,191,36,.08)":"rgba(255,255,255,.02)",
+        border: earned?"2px solid rgba(251,191,36,.3)":"2px solid rgba(255,255,255,.05)",
+        borderRadius:16, padding:"12px 8px", textAlign:"center",
+        filter: earned?"none":"grayscale(1) opacity(.4)",
+        transition:"all .3s", cursor:"pointer", position:"relative",
+        minHeight: 120
+      }}
+    >
+      <div style={{fontSize:28, marginBottom:4}}>{def.icon}</div>
+      <div style={{fontSize:10, color:earned?"#fbbf24":"#475569", lineHeight:1.3, marginBottom:6, fontWeight:500}}>{def.name}</div>
+      {earned ? (
+        <>
+          <div style={{display:"flex",justifyContent:"center",gap:2,marginBottom:4}}>
+            {tiers.map(t => <span key={t.e} style={{fontSize:12}}>{t.e}</span>)}
+          </div>
+          <div style={{fontSize:9,color:"#64748b",fontWeight:600}}>×{count}</div>
+          {next && <div style={{fontSize:8,color:"#475569",marginTop:2}}>+{next.need}→{next.e}</div>}
+        </>
+      ) : (
+        <div style={{fontSize:8,color:"#334155"}}>🔒 Заблоковано</div>
+      )}
+    </div>
+  );
+}
+
+// Achievement details popup - WCAG 2.2 compliant
+function AchievementPopup({ def, count, onClose }) {
+  const tiers = getTiers(count);
+  const next = nextTier(count);
+  
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+  
+  return (
+    <>
+      <div className="achievement-popup-overlay" onClick={onClose} />
+      <div className="achievement-popup" role="dialog" aria-labelledby="achievement-title" aria-describedby="achievement-desc">
+        <div style={{fontSize:48, textAlign:"center", marginBottom:"1rem"}}>{def.icon}</div>
+        <h3 id="achievement-title">{def.name}</h3>
+        <p id="achievement-desc">{def.desc}</p>
+        
+        {count > 0 && (
+          <div style={{marginBottom:"1.5rem"}}>
+            <div style={{display:"flex", justifyContent:"center", gap:"1rem", marginBottom:"1rem"}}>
+              {tiers.map(t => (
+                <div key={t.e} style={{textAlign:"center"}}>
+                  <div style={{fontSize:"2rem"}}>{t.e}</div>
+                  <div style={{color:"#94a3b8", fontSize:"0.9rem"}}>{t.n}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{textAlign:"center", fontSize:"1.2rem", color:"#38bdf8", fontWeight:"600"}}>
+              Виконано: {count} разів
+            </div>
+            {next && (
+              <div style={{textAlign:"center", fontSize:"1rem", color:"#94a3b8", marginTop:"0.5rem"}}>
+                До наступного рівня: {next.need} {next.e}
+              </div>
+            )}
+          </div>
+        )}
+        
+        <button 
+          className="close-btn" 
+          onClick={onClose}
+          aria-label="Закрити деталі досягнення"
+        >
+          Закрити
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ─── INFO CARD ────────────────────────────────────────────────────────────────
+const INFO_DATA = [
+  {icon:"🫁",title:"Діафрагмальне дихання",color:"#38bdf8",steps:["Рука на живіт, інша на груди","Вдих — ЖИВІТ вперед, груди нерухомі","Видих через стиснуті губи — живіт назад","Ритм: 4 сек вдих → 2 сек пауза → 6-8 сек видих"],note:"💡 5-10 хв щодня — за тиждень стане рефлексом"},
+  {icon:"👂",title:"Техніка Френзеля",color:"#a78bfa",steps:["Знайди голосову щілину — звук «кх»","Закрий горло, рухай КОРЕНЕМ язика вгору-вниз","Закрий ніс + горло + рухни коренем язика вгору","Результат: вуха клацають без зусилля"],note:"⚠️ Продувай кожні 50см до появи болю"},
+  {icon:"🧘",title:"Розслаблення перед пірнанням",color:"#4ade80",steps:["5 хв лежиш на воді обличчям вниз","Думай про нейтральне — не про рекорди","Відчуй як тіло опускається при видиху","Заходь у воду тільки при пульсі < 85"],note:"💡 Нирятельний рефлекс: пульс -10-25% при зануренні обличчя"},
+  {icon:"💨",title:"Триступеневий вдих",color:"#fbbf24",steps:["Живіт: діафрагма вниз","Груди: ребра в сторони","Ключиці: підіймаєш верх","Видих зворотньо: верх → середина → живіт"],note:"🚫 НЕ роби гіпервентиляцію — це смертельно небезпечно"},
+  {icon:"🌀",title:"Рефлекс нирця (MDR)",color:"#f87171",steps:["Обличчя у воду → пульс -10-25%","Кисень до серця і мозку","Периферійні судини звужуються","Тренується холодною водою"],note:"💡 Тому фрідайвери тримають дихання довше у воді"},
+  {icon:"⚡",title:"Безпека: ознаки гіпоксії",color:"#ef4444",steps:["🚩 Тунельний зір — ОДРАЗУ вгору","🚩 Непереборний потяг видихнути + скорочення діафрагми","🚩 Ейфорія або легкість — небезпечний знак","🚩 Blackout без попередження — ЗАВЖДИ buddy"],note:"🆘 Жоден рекорд не вартий ризику"},
+];
+
+function InfoCard({ card }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{background:"rgba(255,255,255,.03)",border:`2px solid ${card.color}40`,borderRadius:16,marginBottom:12,overflow:"hidden"}}>
+      <button onClick={() => setOpen(!open)} style={{width:"100%",padding:"16px 18px",background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:14,textAlign:"left"}}>
+        <span style={{fontSize:32,minWidth:40}}>{card.icon}</span>
+        <div style={{flex:1}}>
+          <div style={{color:"#f0f9ff",fontSize:15,fontWeight:500}}>{card.title}</div>
+          <div style={{color:"#64748b",fontSize:10,marginTop:2}}>{open?"Згорнути":"Розгорнути деталі"}</div>
+        </div>
+        <span style={{color:card.color,transition:"transform .3s",display:"block",transform:open?"rotate(180deg)":"none",fontSize:18}}>▾</span>
+      </button>
+      {open && (
+        <div style={{padding:"0 18px 16px",animation:"fadeUp .3s ease"}}>
+          {card.steps.map((s,i) => (
+            <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start",marginBottom:8}}>
+              <div style={{minWidth:22,height:22,borderRadius:"50%",background:`${card.color}25`,border:`2px solid ${card.color}60`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:card.color,flexShrink:0,fontWeight:600}}>{i+1}</div>
+              <div style={{fontSize:13,color:"#e2e8f0",lineHeight:1.6,paddingTop:2}}>{s}</div>
+            </div>
+          ))}
+          <div style={{background:`${card.color}15`,border:`2px solid ${card.color}40`,borderRadius:10,padding:"10px 12px",fontSize:12,color:"#94a3b8",marginTop:8,lineHeight:1.5}}>{card.note}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── LOGIN MODAL ─────────────────────────────────────────────────────────────
+function LoginModal({ onLogin }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError("");
+    
+    try {
+      const user = await signInWithGoogle();
+      if (user) {
+        currentUser = user;
+        onLogin(user);
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setError("Помилка входу. Спробуйте ще раз.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="login-modal">
+      <div className="login-content">
+        <div className="freediving-icon">
+          🤿
+        </div>
+        
+        <div className="login-header">
+          <h1>Freediving Tracker</h1>
+          <p>Ваш персональний тренер фрідайвінгу</p>
+        </div>
+
+        {error && (
+          <div style={{
+            background: "rgba(239, 68, 68, 0.1)",
+            border: "1px solid rgba(239, 68, 68, 0.3)",
+            borderRadius: "12px",
+            padding: "12px",
+            marginBottom: "1rem",
+            color: "#fca5a5",
+            fontSize: "0.9rem",
+            textAlign: "center"
+          }}>
+            {error}
+          </div>
+        )}
+
+        <button 
+          className="google-signin-btn" 
+          onClick={handleGoogleSignIn}
+          disabled={loading}
+        >
+          {loading ? (
+            <>
+              <div style={{
+                width: "20px",
+                height: "20px",
+                border: "2px solid white",
+                borderTopColor: "transparent",
+                borderRadius: "50%",
+                animation: "spin 1s linear infinite"
+              }} />
+              Вхід...
+            </>
+          ) : (
+            <>
+              <svg width="20" height="20" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="currentColor" d="M12 23c2.97 0 5.46-.987.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              Увійти через Google
+            </>
+          )}
+        </button>
+
+        <div style={{
+          marginTop: "1.5rem",
+          fontSize: "0.8rem",
+          color: "#64748b",
+          lineHeight: 1.5,
+          textAlign: "center"
+        }}>
+          Увійшовши, ви зможете синхронізувати дані між пристроями та отримати персональні рекомендації від AI тренера.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SETTINGS MODAL ──────────────────────────────────────────────────────────
+function SettingsModal({ onClose, user }) {
+  const [apiKey, setApiKey] = useState(getApiKey());
+  const [saved, setSaved] = useState(false);
+
+  const save = () => {
+    localStorage.setItem("claude_api_key", apiKey.trim());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+  };
+
+  const handleLogout = async () => {
+    if (confirm("Ви впевнені, що хочете вийти? Дані залишаться збережені.")) {
+      await signOut();
+    }
+  };
+
+  return (
+    <div className="settings-modal">
+      <div className="settings-content">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"2rem"}}>
+          <div>
+            <div style={{fontSize:"0.8rem",letterSpacing:"2px",color:"#38bdf8",textTransform:"uppercase",marginBottom:"0.5rem"}}>Налаштування</div>
+            <div style={{fontSize:"1.3rem",color:"#f0f9ff"}}>Персоналізація</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"#64748b",fontSize:"1.5rem",cursor:"pointer"}}>✕</button>
+        </div>
+
+        {/* User info */}
+        {user && (
+          <div style={{
+            background: "rgba(56, 189, 248, 0.05)",
+            border: "1px solid rgba(56, 189, 248, 0.2)",
+            borderRadius: "12px",
+            padding: "1rem",
+            marginBottom: "1.5rem",
+            display: "flex",
+            alignItems: "center",
+            gap: "1rem"
+          }}>
+            <img 
+              src={user.photoURL} 
+              alt="Profile" 
+              style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                border: "2px solid rgba(56, 189, 248, 0.3)"
+              }}
+            />
+            <div>
+              <div style={{color: "#f0f9ff", fontSize: "1.1rem", fontWeight: "500"}}>{user.displayName}</div>
+              <div style={{color: "#94a3b8", fontSize: "0.9rem"}}>{user.email}</div>
+            </div>
+          </div>
+        )}
+
+        {/* API Key */}
+        <div style={{marginBottom:"1.5rem"}}>
+          <label style={{
+            display: "block",
+            fontSize: "0.9rem",
+            color: "#94a3b8",
+            marginBottom: "0.5rem",
+            fontWeight: "500"
+          }}>
+            🤖 Anthropic API ключ
+          </label>
+          <input 
+            type="password" 
+            placeholder="sk-ant-api03-..." 
+            value={apiKey} 
+            onChange={e=>setApiKey(e.target.value)}
+            style={{marginBottom:"0.5rem"}}
+          />
+          <div style={{fontSize:"0.8rem",color:"#64748b",lineHeight:1.6}}>
+            Для AI аналізу тренувань. Отримайте на{" "}
+            <span 
+              style={{color:"#38bdf8",cursor:"pointer",textDecoration:"underline"}} 
+              onClick={()=>window.open("https://console.anthropic.com","_blank")}
+            >
+              console.anthropic.com
+            </span>
+          </div>
+        </div>
+
+        {/* Save button */}
+        <button 
+          onClick={save} 
+          style={{
+            width:"100%",
+            padding:"12px",
+            borderRadius:"12px",
+            background: saved ? "rgba(74,222,128,.15)" : "linear-gradient(135deg,rgba(56,189,248,.2),rgba(30,58,138,.3))",
+            border: saved ? "2px solid rgba(74,222,128,.4)" : "2px solid rgba(56,189,248,.4)",
+            color: saved ? "#4ade80" : "#38bdf8",
+            fontSize:"1rem",
+            cursor:"pointer",
+            transition:"all .3s",
+            fontWeight: "500",
+            marginBottom: "1rem"
+          }}
+        >
+          {saved ? "✓ Збережено!" : "Зберегти налаштування"}
+        </button>
+
+        {/* Logout button */}
+        {user && (
+          <button 
+            onClick={handleLogout}
+            className="logout-btn"
+          >
+            Вийти з акаунта
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authInitialized, setAuthInitialized] = useState(false);
+  const [user, setUser] = useState(null);
+  const [tab, setTab] = useState("plan");
+  const [phase, setPhase] = useState(1);
+  const [week, setWeek] = useState(1);
+  const [sessions, setSessions] = useState({});
+  const [checks, setChecks] = useState({});
+  const [bNotes, setBNotes] = useState({});
+  const [fitData, setFitData] = useState({});
+  const [aiCache, setAiCache] = useState({});
+  const [planAdj, setPlanAdj] = useState({});
+  const [achCounts, setAchCounts] = useState({});
+  const [editW, setEditW] = useState(null);
+  const [fitLoading, setFitLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState(null);
+  const [pendingPlan, setPendingPlan] = useState(null);
+  const [records, setRecords] = useState([]);
+  const [newRec, setNewRec] = useState(null);
+  const [newAchQ, setNewAchQ] = useState([]);
+  const [running, setRunning] = useState(false);
+  const [secs, setSecs] = useState(0);
+  const [splash, setSplash] = useState({active:false,x:0,y:0,color:"#38bdf8"});
+  const [showIntro, setShowIntro] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [fbReady, setFbReady] = useState(false);
+  const [histView, setHistView] = useState("table");
+  const [achievementPopup, setAchievementPopup] = useState(null);
+  
+  const timerRef = useRef(null);
+  const startRef = useRef(null);
+  const audioRef = useRef(null);
+  const fileRef = useRef(null);
+
+  // Initialize Firebase and auth on mount
+  useEffect(() => {
+    const cfg = getFirebaseCfg();
+    if (cfg) {
+      const ok = initFirebase(cfg);
+      if (ok && auth) {
+        setFbReady(true);
+        
+        // Listen for auth state changes
+        auth.onAuthStateChanged((user) => {
+          if (user) {
+            currentUser = user;
+            setUser(user);
+            setIsAuthenticated(true);
+            _userId = user.uid;
+          } else {
+            currentUser = null;
+            setUser(null);
+            setIsAuthenticated(false);
+            _userId = null;
+          }
+          setAuthInitialized(true);
+        });
+      } else {
+        setAuthInitialized(true);
+      }
+    } else {
+      setAuthInitialized(true);
+    }
+  }, []);
+
+  // Load data when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      (async () => {
+        const s = await store.get("fd5_sessions"); if(s) setSessions(s);
+        const c = await store.get("fd5_checks"); if(c) setChecks(c);
+        const bn = await store.get("fd5_bnotes"); if(bn) setBNotes(bn);
+        const r = await store.get("fd5_records"); if(r) setRecords(r);
+        const f = await store.get("fd5_fit"); if(f) setFitData(f);
+        const ai = await store.get("fd5_ai"); if(ai) setAiCache(ai);
+        const pa = await store.get("fd5_padj"); if(pa) setPlanAdj(pa);
+        const ac = await store.get("fd5_ach"); if(ac) setAchCounts(ac);
+        setLoaded(true);
+      })();
+    }
+  }, [isAuthenticated]);
+
+  // Timer effect
+  useEffect(() => {
+    if (running) {
+      startRef.current = Date.now() - secs*1000;
+      timerRef.current = setInterval(() => setSecs(Math.floor((Date.now()-startRef.current)/1000)), 100);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [running]);
+
+  // Grant achievement function
+  const grantAch = useCallback(async (id) => {
+    setAchCounts(prev => {
+      const prevC = prev[id] || 0;
+      const newC = prevC + 1;
+      const updated = {...prev, [id]: newC};
+      store.set("fd5_ach", updated);
+      const prevTiers = getTiers(prevC).length;
+      const newTiers = getTiers(newC).length;
+      if (newTiers > prevTiers) {
+        const def = ACH_DEFS.find(a => a.id===id);
+        if (def) {
+          setNewAchQ(q => [...q, {...def, earnedCount: newC}]);
+          setTimeout(() => setNewAchQ(q => q.slice(1)), 4000);
+        }
+      }
+      return updated;
+    });
+  }, []);
+
+  // Splash effect
+  const triggerSplash = (e, color) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = r.left + r.width/2, y = r.top + r.height/2;
+    setSplash({active:false, x, y, color: color||"#38bdf8"});
+    setTimeout(() => setSplash({active:true, x, y, color: color||"#38bdf8"}), 10);
+    setTimeout(() => setSplash(s => ({...s, active:false})), 700);
+  };
+
+  // Audio initialization
+  const initAudio = () => {
+    if (!audioRef.current) try { audioRef.current = new (window.AudioContext||window.webkitAudioContext)(); } catch(e) {}
+    if (audioRef.current?.state === "suspended") audioRef.current.resume();
+  };
+
+  // Timer functions
+  const startTimer = e => {
+    initAudio(); triggerSplash(e, "#38bdf8");
+    vib([80,40,80]); beep(
+audioRef.current, 880, .12, .5);
+    setNewRec(null); setRunning(true);
+  };
+
+  const stopTimer = async () => {
+    setRunning(false); vib([150]);
+    beep(audioRef.current, 440, .18, .4);
+    setTimeout(() => beep(audioRef.current, 330, .25, .3), 200);
+    if (secs < 3) { setSecs(0); return; }
+    const best = records.length ? Math.max(...records.map(r=>r.s)) : 0;
+    const isRec = secs > best;
+    const rec = { s:secs, date:fmtDate(), time:fmtTime(), rec:isRec };
+    const upd = [rec, ...records];
+    setRecords(upd); await store.set("fd5_records", upd);
+    if (isRec) {
+      setNewRec(rec); vib([80,40,80,40,250]);
+      beep(audioRef.current,660,.12,.4);
+      setTimeout(()=>beep(audioRef.current,880,.12,.4),160);
+      setTimeout(()=>beep(audioRef.current,1100,.25,.4),320);
+      await grantAch("pb");
+    }
+    for (const a of ACH_DEFS.filter(a=>a.type==="timer")) {
+      if (secs >= a.thr) await grantAch(a.id);
+    }
+    setSecs(0);
+  };
+
+  // FIT file upload
+  const handleFitUpload = async (file, weekNum) => {
+    if (!file) return;
+    setFitLoading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = parseFitFile(buf);
+      if (!parsed) { alert("Не вдалося розпарсити FIT файл."); setFitLoading(false); return; }
+      const updated = {...fitData, [weekNum]: parsed};
+      setFitData(updated); await store.set("fd5_fit", updated);
+      await grantAch("fit");
+    } catch(e) { alert("Помилка читання файлу."); }
+    setFitLoading(false);
+  };
+
+  // AI analysis
+  const runAnalysis = async weekNum => {
+    setAiLoading(true); setAiError(null);
+    try {
+      const plan = getPlan(weekNum);
+      const result = await runAIAnalysis({
+        week: weekNum,
+        session: sessions[weekNum] || {},
+        fitStats: fitData[weekNum]?.stats || null,
+        planBlocks: plan.blocks,
+        planGoals: plan.goals,
+        blockNotes: bNotes,
+        timerRecords: records,
+        allSessions: sessions
+      });
+      const updated = {...aiCache, [weekNum]: result};
+      setAiCache(updated); await store.set("fd5_ai", updated);
+      if (result.suggestions?.length || result.goalSuggestions?.length) {
+        setPendingPlan({week: weekNum, ...result});
+      }
+    } catch(e) { setAiError("Помилка AI: " + e.message); }
+    setAiLoading(false);
+  };
+
+  // Accept plan changes
+  const acceptPlan = async () => {
+    if (!pendingPlan) return;
+    const { week:w, suggestions=[], goalSuggestions=[] } = pendingPlan;
+    const base = getPlan(w);
+    const newBlocks = base.blocks.map(b => ({...b}));
+    const newGoals = {...base.goals};
+    suggestions.forEach(s => { if
+ (s.blockIndex>=0 && s.blockIndex<newBlocks.length) newBlocks[s.blockIndex][s.field] = s.proposed; });
+    goalSuggestions.forEach(s => { newGoals[s.field] = s.proposed; });
+    const updated = {...planAdj, [w]:{blocks:newBlocks, goals:newGoals}};
+    setPlanAdj(updated); await store.set("fd5_padj", updated);
+    setPendingPlan(null); await grantAch("plan");
+  };
+
+  // Save session
+  const saveSession = async (w, data) => {
+    const u = {...sessions, [w]: data}; setSessions(u); await store.set("fd5_sessions", u);
+    setEditW(null); await grantAch("sess");
+    const plan = getPlan(w);
+    const allDone = plan.blocks.every((_,i) => checks[w+"_"+i]);
+    if (allDone) await grantAch("blks");
+    let streak = 0;
+    for (let i=w; i>=1; i--) { if (u[i]?.completed) streak++; else break; }
+    if (streak >= 3) await grantAch("cons");
+    if (Object.values(u).filter(s=>s?.completed).length === 12) await grantAch("elite");
+  };
+
+  // Toggle check
+  const toggleCheck = async k => {
+    const u = {...checks, [k]: !checks[k]}; setChecks(u); await store.set("fd5_checks", u);
+  };
+
+  // Update block note
+  const updateBNote = async (k,v) => {
+    const u = {...bNotes, [k]: v}; setBNotes(u); await store.set("fd5_bnotes", u);
+  };
+
+  // Get plan (with adjustments)
+  const getPlan = w => {
+    const adj = planAdj[w];
+    if (!adj) return BASE_PLANS[w] || BASE_PLANS[1];
+    return {...BASE_PLANS[w], ...adj};
+  };
+
+  // Handle login
+  const handleLogin = (user) => {
+    setUser(user);
+    setIsAuthenticated(true);
+  };
+
+  // Show achievement details
+  const showAchievementDetails = (def, count) => {
+    setAchievementPopup({ def, count });
+  };
+
+  // If not loaded yet, show loading
+  if (!loaded && isAuthenticated) {
+    return (
+      <div style={{
+        background: "linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f4c75 50%, #3282b8 75%, #bbe1fa 100%)",
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#38bdf8",
+        fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+        fontSize: "1.2rem"
+      }}>
+        <div style={{textAlign: "center"}}>
+          <div style={{fontSize: "3rem", marginBottom: "1rem"}}>🤿</div>
+          <div>Завантаження...</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show login modal if not authenticated
+  if (!authInitialized) {
+    return (
+      <div style={{
+        background: "linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f4c75 50%, #3282b8 75%, #bbe1fa 100%)",
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "#38bdf8",
+        fontSize: "1.2rem"
+      }}>
+        <div style={{textAlign: "center"}}>
+          <div style={{fontSize: "3rem", marginBottom: "1rem"}}>🤿</div>
+          <div>Ініціалізація...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f4c75 50%, #3282b8 75%, #bbe1fa 100%)",
+      minHeight: "100vh",
+      position: "relative"
+    }}>
+      {/* Water bubbles */}
+      {[...Array(8)].map((_, i) => (
+        <div
+          key={i}
+          className="water-bubble"
+          style={{
+            left: `${10 + i * 12}%`,
+            width: `${8 + (i % 3) * 4}px`,
+            height: `${8 + (i % 3) * 4}px`,
+            animationDelay: `${i * 0.8}s`,
+            animationDuration: `${6 + i * 0.5}s`
+          }}
+        />
+      ))}
+      
+      {/* Login Modal */}
+      <LoginModal onLogin={handleLogin} />
+      </div>
+    );
+  }
+          
+  // Main app variables
+  const plan = getPlan(week);
+  const phaseObj = PHASES.find(p => p.weeks.includes(week)) || PHASES[0];
+  const best = records.length ? Math.max(...records.map(r=>r.s)) : 0;
+  const doneCount = Object.values(sessions).filter(s=>s?.completed).length;
+  const TABS = [
+    {id:"plan",     e:"📋", l:"План"},
+    {id:"staticka", e:"⏱",  l:"Статика"},
+    {id:"progress", e:"📈", l:"Прогрес"},
+    {id:"info",     e:"💡", l:"Знання"},
+    {id:"rules",    e:"📌", l:"Правила"},
+  ];
+
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, #0f172a 0%, #1e293b 25%, #0f4c75 50%, #3282b8 75%, #bbe1fa 100%)",
+      minHeight: "100vh",
+      fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+      color: "#e2e8f0",
+      overflow: "hidden",
+      position: "relative"
+    }}>
+      {/* Water bubbles */}
+      {[...Array(12)].map((_, i) => (
+        <div
+          key={i}
+          className="water-bubble"
+          style={{
+            left: `${5 + i * 8}%`,
+            width: `${6 + (i % 4) * 3}px`,
+            height: `${6 + (i % 4) * 3}px`,
+            animationDelay: `${i * 0.7}s`,
+            animationDuration: `${8 + i * 0.4}s`
+          }}
+        />
+      ))}
+
+      {showIntro && <DropIntro onDone={() => setShowIntro(false)} />}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} user={user} />}
+      {achievementPopup && (
+        <AchievementPopup 
+          def={achievementPopup.def} 
+          count={achievementPopup.count} 
+          onClose={() => setAchievementPopup(null)} 
+        />
+      )}
+      <CrownSplash active={splash.active} color={splash.color} x={splash.x} y={splash.y} />
+
+      {/* Achievement toast */}
+      {newAchQ[0] && (
+        <div style={{position:"fixed",top:14,right:14,zIndex:9000,background:"rgba(15,23,42,.98)",border:"2px solid rgba(251,191,36,.5)",borderRadius:16,padding:"16px 20px",maxWidth:280,animation:"achIn 4s ease forwards",boxShadow:"0 12px 40px rgba(0,0,0,.7)"}}>
+          <div style={{fontSize:32,marginBottom:6,textAlign:"center"}}>{newAchQ[0].
+icon}</div>
+          <div style={{color:"#fbbf24",fontSize:12,marginBottom:2,fontWeight:600,textAlign:"center"}}>Досягнення розблоковано!</div>
+          <div style={{color:"#f0f9ff",fontSize:14,textAlign:"center",marginBottom:4}}>{newAchQ[0].name}</div>
+          <div style={{display:"flex",gap:3,justifyContent:"center"}}>{getTiers(newAchQ[0].earnedCount||1).map(t=><span key={t.e} style={{fontSize:14}}>{t.e}</span>)}</div>
+        </div>
+      )}
+
+      {/* New record toast */}
+      {newRec && (
+        <div style={{position:"fixed",top:newAchQ[0]?110:14,left:"50%",transform:"translateX(-50%)",zIndex:8900,background:"rgba(15,23,42,.98)",border:"2px solid rgba(251,191,36,.6)",borderRadius:16,padding:"16px 24px",textAlign:"center",animation:"pop .5s ease",boxShadow:"0 12px 40px rgba(251,191,36,.3)"}}>
+          <div style={{fontSize:36,marginBottom:4}}>🏅</div>
+          <div style={{color:"#fbbf24",fontSize:14,marginBottom:2,fontWeight:600}}>Новий рекорд!</div>
+          <div style={{color:"#f0f9ff",fontSize:24,fontFamily:"monospace",marginBottom:2}}>{fmt(newRec.s)}</div>
+          <div style={{color:"#64748b",fontSize:11}}>Молодець, Станіслав!</div>
+          <button onClick={() => setNewRec(null)} style={{marginTop:8,background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:12}}>✕</button>
+        </div>
+      )}
+
+      {/* Pending plan modal */}
+      {pendingPlan && (
+        <div style={{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,.9)",backdropFilter:"blur(8px)",display:"flex",alignItems:"center",justifyContent:"center",padding:14}}>
+          <div style={{background:"rgba(15,23,42,.98)",border:"2px solid rgba(56,189,248,.4)",borderRadius:20,padding:24,maxWidth:480,width:"100%",maxHeight:"80vh",overflowY:"auto",animation:"pop .3s ease"}}>
+            <div style={{fontSize:10,letterSpacing:3,color:"#38bdf8",textTransform:"uppercase",marginBottom:8}}>Jan Claude One Damn</div>
+            <div style={{fontSize:18,color:"#f0f9ff",marginBottom:16}}>Пропозиція корекції плану</div>
+            {[...(pendingPlan.goalSuggestions||[]).map(s=>({...s,isGoal:true})), ...(pendingPlan.suggestions||[]).map(s=>({...s,isGoal:false}))].map((s,i) => (
+              <div key={i} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:12,marginBottom:10}}>
+                <div style={{fontSize:11,color:"#38bdf8",marginBottom:4}}>Тиждень {s.targetWeek} — {s.isGoal?"Ціль":"Блок "+(s.blockIndex+1)}</div>
+                <div style={{fontSize:12,color:"#64748b",textDecoration:"line-through",marginBottom:3}}>Було: {s.original}</div>
+                <div style={{fontSize:13,color:"#4ade80",marginBottom:5}}>Буде: {s.proposed}</div>
+                <div style={{fontSize:11,color:"#94a3b8",fontStyle:"italic"}}>{s.reason}</div>
+              </div>
+            ))}
+            <div style={{display:"flex",gap:10,marginTop:16}}>
+              <button onClick={() => setPendingPlan(null)} style={{flex:1,padding:12,borderRadius:12,background:"rgba(239,68,68,.08)",border:"2px solid rgba(239,68,68,.25)",color:"#fca5a5",cursor:"pointer",fontWeight:500}}>✕ Скасувати</button>
+              <button onClick={acceptPlan} style={{flex:2,padding:12,borderRadius:12,background:"linear-gradient(135deg,rgba(74,222,128,.2),rgba(14,116,144,.3))",border:"2px solid rgba(74,222,128,.4)",color:"#4ade80",cursor:"pointer",fontWeight:500}}>✓ Прийняти зміни</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="app-container authenticated" style={{position:"relative",zIndex:1,maxWidth:600,margin:"0 auto",paddingBottom:80}}>
+
+        {/* Header */}
+        <div style={{padding:"24px 16px 14px",textAlign:"center"}}>
+          <div style={{fontSize:10,letterSpacing:4,color:"#38bdf8",textTransform:"uppercase",marginBottom:6}}>Freediving Tracker</div>
+          <div style={{position:"relative"}}>
+            <button onClick={()=>setShowSettings(true)} title="Налаштування" style={{position:"absolute",right:0,top:0,background:"rgba(255,255,255,.08)",border:"2px solid rgba(255,255,255,.15)",borderRadius:10,color:"#64748b",fontSize:16,cursor:"pointer",padding:"6px 10px",lineHeight:1}}>⚙️</button>
+            <h1 style={{margin:0,fontSize:24,fontWeight:400,color:"#f0f9ff"}}>Станіслав Гойсан</h1>
+          </div>
+          <div style={{fontSize:11,color:"#64748b",marginTop:4}}>Басейн 25м · Щосуботи 12:00 · 3.8м</div>
+          <div style={{marginTop:12,background:"rgba(255,255,255,.06)",borderRadius:100,height:6,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${(doneCount/12)*100}%`,background:"linear-gradient(90deg,#0ea5e9,#38bdf8,#7dd3fc)",borderRadius:100,transition:"width .5s",boxShadow:"0 0 15px rgba(56,189,248,.5)"}}/>
+          </div>
+          <div style={{marginTop:4,fontSize:11,color:"#64748b"}}>{doneCount}/12 тренувань · Рекорд статики: {best>0?fmt(best):"—"}</div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{display:"flex",gap:3,margin:"0 16px16px",background:"rgba(255,255,255,.04)",borderRadius:16,padding:4,border:"2px solid rgba(255,255,255,.08)"}}>
+          {TABS.map(t => (
+            <button key={t.id} onClick={e=>{setTab(t.id);triggerSplash(e,"#38bdf8");}} style={{flex:1,padding:"10px 4px",border:"none",borderRadius:12,background:tab===t.id?"rgba(56,189,248,.15)":"transparent",color:tab===t.id?"#38bdf8":"#64748b",fontSize:10,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,borderBottom:tab===t.id?"3px solid #38bdf8":"3px solid transparent",transition:"all .3s",fontWeight:tab===t.id?600:400}}>
+              <span style={{fontSize:18}}>{t.e}</span><span>{t.l}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* ── PLAN ── */}
+        {tab==="plan" && (
+          <div style={{padding:"0 16px",animation:"fadeUp .3s ease"}}>
+            {/* Phases */}
+            <div style={{display:"flex",gap:8,marginBottom:14}}>
+              {PHASES.map(ph => {
+                const active = phase===ph.id;
+                return (
+                  <button key={ph.id} className="wbtn" onClick={e=>{setPhase(ph.id);setWeek(ph.weeks[0]);triggerSplash(e,ph.color);}} style={{flex:1,padding:"12px 6px",border:`2px solid ${active?ph.color:"rgba(255,255,255,.08)"}`,borderRadius:14,background:active?`rgba(${ph.rgb},.08)`:"rgba(255,255,255,.03)",color:active?ph.color:"#64748b",fontSize:12,cursor:"pointer",textAlign:"center"}}>
+                    <div style={{fontWeight:600,marginBottom:2}}>{ph.name}</div>
+                    <div style={{opacity:.8,fontSize:10}}>{ph.subtitle}</div>
+                    <div style={{opacity:.6,fontSize:9}}>Тижні {ph.weeks[0]}–{ph.weeks[ph.weeks.length-1]}</div>
+                  </button>
+                );
+              })}
+            </div>
+            
+            {/* Weeks */}
+            <div style={{display:"flex",gap:8,marginBottom:14}}>
+              {PHASES.find(p=>p.id===phase)?.weeks.map(w => {
+                const isDone=sessions[w]?.completed, isAct=week===w;
+                return (
+                  <button key={w} className="wbtn" onClick={e=>{setWeek(w);triggerSplash(e,phaseObj.color);}} style={{flex:1,height:52,borderRadius:12,background:isAct?"rgba(56,189,248,.15)":isDone?"rgba(74,222,128,.08)":"rgba(255,255,255,.03)",border:isAct?"3px solid #38bdf8":isDone?"2px solid rgba(74,222,128,.4)":"2px solid rgba(255,255,255,.08)",color:isAct?"#38bdf8":isDone?"#4ade80":"#94a3b8",fontSize:14,fontWeight:600,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}}>
+                    <span>{w}</span>{isDone&&<span style={{fontSize:10}}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {plan && (
+              <>
+                
+<div style={{background:"rgba(255,255,255,.03)",border:`2px solid rgba(${phaseObj.rgb},.2)`,borderRadius:18,padding:16,marginBottom:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                    <div>
+                      <div style={{fontSize:20,color:"#f0f9ff",fontWeight:500}}>Тиждень {week}</div>
+                      <div style={{fontSize:11,color:phaseObj.color,marginTop:3}}>{phaseObj.name} — {phaseObj.subtitle}</div>
+                      {planAdj[week] && <div style={{fontSize:9,color:"#38bdf8",marginTop:3}}>✦ Скорегований AI</div>}
+                    </div>
+                    {sessions[week]?.completed && (
+                      <div style={{background:"rgba(74,222,128,.12)",border:"2px solid rgba(74,222,128,.4)",color:"#4ade80",padding:"4px 12px",borderRadius:100,fontSize:11,fontWeight:500}}>✓ Завершено</div>
+                    )}
+                  </div>
+
+                  {/* Goals */}
+                  <div style={{display:"flex",gap:8,marginBottom:14}}>
+                    {[{e:"⏱",l:"Статика",v:plan.goals.s,link:true},{e:"🏊",l:"Динаміка",v:plan.goals.d},{e:"🤿",l:"Глибина",v:plan.goals.g}].map((g,i) => (
+                      <div key={i} onClick={g.link ? e=>{setTab("staticka");triggerSplash(e,"#38bdf8");} : undefined}
+                        className={g.link?"wbtn":""}
+                        style={{flex:1,background:`rgba(${phaseObj.rgb},.06)`,border:`2px solid rgba(${phaseObj.rgb},.15)`,borderRadius:12,padding:"10px 6px",textAlign:"center",cursor:g.link?"pointer":"default"}}>
+                        <div style={{fontSize:16,marginBottom:3}}>{g.e}</div>
+                        <div style={{fontSize:9,color:"#94a3b8",marginBottom:2}}>{g.l}</div>
+                        <div style={{fontSize:9,color:phaseObj.color,lineHeight:1.4,fontWeight:500}}>{g.v}</div>
+                        {g.link && <div style={{fontSize:8,color:"#38bdf8",marginTop:3}}>→ Таймер</div>}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Blocks */}
+                  {plan.blocks.map((b,i) => {
+                    const ck=week+"_"+i, isDone=!!checks[ck], nk=week+"_n_"+i, nv=bNotes[nk]||"";
+                    return (
+                      <div key={i} style={{background:isDone?"rgba(74,222,128,.05)":"rgba(255,255,255,.02)",border:isDone?"2px solid rgba(74,222,128,.2)":"2px solid rgba(255,255,255,.06)",borderRadius:12,padding:"12px 14px",marginBottom:8,transition:"all .3s"}}>
+                        <div style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                          <button onClick={()=>toggleCheck(ck)} style={{width:24,height:24,minWidth:24,borderRadius:6,border:isDone?"3px solid #4ade80":"3px solid rgba(255,255,255,.25)",background:isDone?"rgba(74,222,128,.2)":"transparent",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",marginTop:2,transition:"all .3s",color:"#4ade80",fontSize:12,fontWeight:600}}>
+                            {isDone?"✓":""}
+                          </button>
+                          <div style={{flex:1}}>
+                            <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+                              <span style={{color:isDone?"#4ade80":"#f0f9ff",fontSize:13,opacity:isDone?.7:1,textDecoration:isDone?"line-through":"none",fontWeight:500}}>{b.n}</span>
+                              <span style={{color:"#64748b",fontSize:11}}>{b.t}</span>
+                            </div>
+                            <div style={{color:"#94a3b8",fontSize:12,lineHeight:1.6,marginBottom:6}}>{b.d}</div>
+                            <textarea rows={1} placeholder="Нотатки до блоку..." value={nv} onChange={e=>updateBNote(nk,e.target.value)} style={{resize:"vertical",minHeight:32,fontSize:11,color:"#cbd5e1",borderColor:"rgba(255,255,255,.08)",padding:"6px 10px"}}/>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{background:`${phaseObj.color}15`,border:`2px solid ${phaseObj.color}40`,borderRadius:10,padding:"10px 12px",fontSize:12,color:"#fbbf24",marginTop:4}}>{plan.tip}</div>
+                </div>
+
+                {!sessions[week]?.completed
+                  ? <button className="wbtn" onClick={e=>{triggerSplash(e,phaseObj.color);setEditW({week,...(sessions[week]||{completed:false,date:"",staticTime:"",dynamicDist:"",avgHR:"",maxHR:"",notes:"",feeling:""})});}} style={{width:"100%",padding:14,borderRadius:14,background:`linear-gradient(135deg,rgba(${phaseObj.rgb},.2),rgba(30,58,138,.3))`,border:`2px solid rgba(${phaseObj.rgb},.4)`,color:phaseObj.color,fontSize:14,cursor:"pointer",marginBottom:10,fontWeight:500}}>+ Записати результат тренування</button>
+                  : <button className="wbtn" onClick={e=>{triggerSplash(e,"#4ade80");setEditW({week,...sessions[week]});}} style={{width:"100%",padding:14,borderRadius:14,background:"rgba(74,222,128,.06)",border:"2px solid rgba(74,222,128,.25)",color:"#4ade80",fontSize:13,cursor:"pointer",marginBottom:10,fontWeight:500}}>✏️ Редагувати запис</button>
+                }
+
+                {/* AI Analysis */}
+                {sessions[week]?.completed && (
+                  <div style={{background:"rgba(15,30,60,.7)",border:"2px solid rgba(56,189,248,.25)",borderRadius:16,padding:16,marginBottom:10}}>
+                    <div style={{fontSize:10,letterSpacing:3,color:"#38bdf8",textTransform:"uppercase",marginBottom:10}}>🤖 Jan Claude One Damn</div>
+                    {
+fitData[week] && (
+                      <div style={{background:"rgba(56,189,248,.05)",border:"2px solid rgba(56,189,248,.12)",borderRadius:12,padding:10,marginBottom:10}}>
+                        <div style={{fontSize:10,color:"#38bdf8",marginBottom:6}}>📈 HR — Garmin Descend MK2S</div>
+                        <HRChart pts={fitData[week].pts} color="#38bdf8"/>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginTop:8}}>
+                          {[{l:"Avg HR",v:fitData[week].stats.avg},{l:"Max HR",v:fitData[week].stats.max},{l:"Min HR",v:fitData[week].stats.min}].map((s,i)=>(
+                            <div key={i} style={{textAlign:"center",background:"rgba(255,255,255,.04)",borderRadius:8,padding:"6px 4px"}}>
+                              <div style={{fontSize:14,color:s.l==="Max HR"&&s.v>120?"#f87171":s.l==="Min HR"&&s.v<85?"#4ade80":"#f0f9ff",fontWeight:600}}>{s.v||"—"}</div>
+                              <div style={{fontSize:9,color:"#64748b"}}>{s.l}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {aiCache[week] && (
+                      <div style={{animation:"fadeUp .3s ease"}}>
+                        <div style={{background:aiCache[week].verdict==="critical"?"rgba(239,68,68,.08)":aiCache[week].verdict==="warning"?"rgba(251,191,36,.08)":"rgba(74,222,128,.06)",border:`2px solid ${aiCache[week].verdict==="critical"?"rgba(239,68,68,.25)":aiCache[week].verdict==="warning"?"rgba(251,191,36,.25)":"rgba(74,222,128,.2)"}`,borderRadius:12,padding:12,marginBottom:10}}>
+                          <div style={{fontSize:12,color:"#cbd5e1",lineHeight:1.8}}>{aiCache[week].analysis}</div>
+                        </div>
+                        {(aiCache[week].suggestions?.length||aiCache[week].goalSuggestions?.length) > 0 && !planAdj[week] && (
+                          <button className="wbtn" onClick={()=>setPendingPlan({week,...aiCache[week]})} style={{width:"100%",padding:10,borderRadius:12,background:"rgba(56,189,248,.08)",border:"2px solid rgba(56,189,248,.25)",color:"#38bdf8",fontSize:12,cursor:"pointer",marginBottom:8,fontWeight:500}}>
+                            📋 Переглянути пропозиції корекції плану
+                          </button>
+                        )}
+                        {planAdj[week] && <div style={{fontSize:11,color:"#4ade80",textAlign:"center",marginBottom:8}}>✓ План скорегований</div>}
+                      </div>
+                    )}
+                    {aiError && <div style={{color:"#fca5a5",fontSize:11,marginBottom:8}}>{aiError}</div>}
+                    <button className="wbtn" onClick={()=>runAnalysis(week)} disabled={aiLoading} style={{width:"100%",padding:10,borderRadius:12,background:aiLoading?"rgba(255,255,255,.03)":"rgba(56,189,248,.1)",border:"2px solid rgba(56,189,248,.25)",color:aiLoading?"#64748b":"#38bdf8",fontSize:12,cursor:aiLoading?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontWeight:500}}>
+                      {aiLoading ? <><div style={{width
+:14,height:14,border:"2px solid #38bdf8",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Аналізую...</> : "🔍 Аналіз від Jan Claude One Damn"}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── СТАТИКА ── */}
+        {tab==="staticka" && (
+          <div style={{padding:"0 16px",animation:"fadeUp .3s ease"}}>
+            {/* Timer */}
+            <div style={{background:"rgba(255,255,255,.03)",border:"2px solid rgba(56,189,248,.2)",borderRadius:20,padding:"28px 16px",marginBottom:16,textAlign:"center"}}>
+              <div style={{fontSize:10,letterSpacing:3,color:"#64748b",textTransform:"uppercase",marginBottom:12}}>Статична затримка дихання</div>
+              <div style={{fontSize:72,fontFamily:"monospace",color:running?"#38bdf8":"#f0f9ff",letterSpacing:6,lineHeight:1,marginBottom:6,animation:running?"glow 2s ease infinite":"none",fontWeight:300}}>{fmt(secs)}</div>
+              {best>0 && (
+                <div style={{fontSize:12,color:"#64748b",marginBottom:16}}>
+                  Рекорд: <span style={{color:"#fbbf24",fontWeight:600}}>{fmt(best)}</span>
+                  {running && secs<best && <span style={{color:"#94a3b8"}}> · ще {fmt(best-secs)}</span>}
+                  {running && secs>=best && <span style={{color:"#4ade80",fontWeight:600}}> 🔥 Рекорд!</span>}
+                </div>
+              )}
+              {!running
+                ? <button onClick={startTimer} style={{width:140,height:140,borderRadius:"50%",background:"linear-gradient(135deg,rgba(14,116,144,.5),rgba(30,58,138,.6))",border:"4px solid rgba(56,189,248,.6)",color:"#38bdf8",fontSize:16,cursor:"pointer",animation:"pulse 2s ease infinite",display:"inline-flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,fontWeight:600}}>
+                    <span style={{fontSize:36}}>🤿</span><span>СТАРТ</span>
+                  </button>
+                : <button onClick={stopTimer} style={{width:140,height:140,borderRadius:"50%",background:"linear-gradient(135deg,rgba(239,68,68,.4),rgba(185,28,28,.5))",border:"4px solid rgba(239,68,68,.6)",color:"#fca5a5",fontSize:16,cursor:"pointer",animation:"pulseRed 1.2s ease infinite",display:"inline-flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,fontWeight:600}}>
+                    <span style={{fontSize:36}}>✋</span><span>СТОП</span>
+                  </button>
+              }
+              <div style={{marginTop:12,fontSize:11,color:"#475569"}}>{running?"Натисни СТОП коли захочеш видихнути":"Натисни СТАРТ перед затримкою"}</div>
+            </div>
+
+            {/* History toggle */}
+            {records.length > 0 && (
+              <div style={{marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10
+}}>
+                  <div style={{fontSize:10,letterSpacing:3,color:"#64748b",textTransform:"uppercase"}}>Історія затримок</div>
+                  <div style={{display:"flex",gap:6}}>
+                    {["chart","table"].map(v => (
+                      <button key={v} onClick={()=>setHistView(v)} style={{padding:"4px 12px",borderRadius:20,border:`2px solid ${histView===v?"rgba(56,189,248,.5)":"rgba(255,255,255,.08)"}`,background:histView===v?"rgba(56,189,248,.15)":"transparent",color:histView===v?"#38bdf8":"#64748b",fontSize:10,cursor:"pointer",fontWeight:500}}>
+                        {v==="chart"?"📈 Графік":"📋 Таблиця"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {histView==="chart" && (
+                  <div style={{background:"rgba(255,255,255,.03)",border:"2px solid rgba(56,189,248,.15)",borderRadius:14,padding:"14px 12px"}}>
+                    <div style={{fontSize:11,color:"#64748b",marginBottom:8}}>Прогрес статики · 🏅 = рекорд</div>
+                    <StaticHistoryChart records={records}/>
+                    {/* Stats row */}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginTop:12}}>
+                      {[
+                        {l:"Рекорд",v:fmt(best),c:"#fbbf24"},
+                        {l:"Середнє",v:fmt(Math.round(records.reduce((a,r)=>a+r.s,0)/records.length)),c:"#38bdf8"},
+                        {l:"Сесій",v:records.length,c:"#94a3b8"},
+                        {l:"Рекордів",v:records.filter(r=>r.rec).length,c:"#4ade80"},
+                      ].map((s,i) => (
+                        <div key={i} style={{textAlign:"center",background:"rgba(255,255,255,.04)",borderRadius:8,padding:"8px 4px"}}>
+                          <div style={{fontSize:14,color:s.c,fontFamily:"monospace",fontWeight:600}}>{s.v}</div>
+                          <div style={{fontSize:9,color:"#64748b",marginTop:1}}>{s.l}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {histView==="table" && (
+                  <div style={{background:"rgba(255,255,255,.03)",border:"2px solid rgba(255,255,255,.08)",borderRadius:14,overflow:"hidden"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"28px 1fr auto auto",borderBottom:"2px solid rgba(255,255,255,.06)"}}>
+                      {["#","Час","Дата",""].map((h,i) => (
+                        <div key={i} style={{padding:"10px 12px",fontSize:9,color:"#64748b",letterSpacing:1,textTransform:"uppercase",fontWeight:600}}>{h}</div>
+                      ))}
+                    </div>
+                    {records.slice(0,25).map((r,i) => (
+                      <div key={i} style={{display:"grid",gridTemplateColumns:"28px 1fr auto auto",borderBottom:"1px solid rgba(255,255,255,.04)",background:i%2?"rgba(255,255,255,.02)":"transparent"}}>
+                        <div style={{padding:"10px 12px",fontSize:11,color:"#475569"}}>{i+1}</div>
+                        <div style={{padding:"10px 12px",fontSize:18,fontFamily:"monospace",color:r.rec?"#fbbf24":"#f0f9ff",display:"flex",alignItems:"center",gap:6,fontWeight:500}}>
+                          {fmt
+(r.s)}{r.rec && <span style={{fontSize:12}}>🏅</span>}
+                        </div>
+                        <div style={{padding:"10px 8px",fontSize:10,color:"#64748b",lineHeight:1.5}}>{r.date}<br/>{r.time}</div>
+                        <div style={{padding:"10px 8px",display:"flex",alignItems:"center"}}>
+                          <button onClick={async()=>{const u=records.filter((_,idx)=>idx!==i);setRecords(u);await store.set("fd5_records",u);}} style={{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:14}}>✕</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Achievements */}
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:10,letterSpacing:3,color:"#64748b",textTransform:"uppercase",marginBottom:10}}>Досягнення <span style={{color:"#475569",fontWeight:"normal"}}>(натисни для деталей)</span></div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+                {ACH_DEFS.map(a => <AchBadge key={a.id} def={a} count={achCounts[a.id]||0} onShowDetails={showAchievementDetails}/>)}
+              </div>
+              {/* Cup legend */}
+              <div style={{display:"flex",gap:14,justifyContent:"center",marginTop:10,padding:"8px 12px",background:"rgba(255,255,255,.03)",borderRadius:12}}>
+                {[{e:"🥉",n:"Бронза",r:"1–10"},{e:"🥈",n:"Срібло",r:"11–50"},{e:"🥇",n:"Золото",r:"51–99"},{e:"🏆",n:"Платина",r:"100+"}].map(t => (
+                  <div key={t.e} style={{textAlign:"center"}}>
+                    <div style={{fontSize:18}}>{t.e}</div>
+                    <div style={{fontSize:9,color:"#94a3b8"}}>{t.r}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── PROGRESS ── */}
+        {tab==="progress" && (
+          <div style={{padding:"0 16px",animation:"fadeUp .3s ease"}}>
+            <div style={{display:"flex",gap:8,marginBottom:16}}>
+              {[{l:"Тренувань",v:`${doneCount}/12`,e:"✅"},{l:"Рекорд статики",v:best>0?fmt(best):"—",e:"🏅"},{l:"Сесій таймера",v:records.length,e:"⏱"}].map((s,i) => (
+                <div key={i} style={{flex:1,background:"rgba(255,255,255,.03)",border:"2px solid rgba(255,255,255,.08)",borderRadius:14,padding:"14px 8px",textAlign:"center"}}>
+                  <div style={{fontSize:24,marginBottom:4}}>{s.e}</div>
+                  <div style={{fontSize:18,color:"#38bdf8",marginBottom:3,fontWeight:600}}>{s.v}</div>
+                  <div style={{fontSize:9,color:"#64748b"}}>{s.l}</div>
+                </div>
+              ))}
+            </div>
+
+
+            {/* Session history chart */}
+            {doneCount >= 2 && (
+              <div style={{background:"rgba(255,255,255,.03)",border:"2px solid rgba(74,222,128,.15)",borderRadius:14,padding:"14px 12px",marginBottom:14}}>
+                <div style={{fontSize:10,color:"#4ade80",marginBottom:8,letterSpacing:2,textTransform:"uppercase"}}>Прогрес статики по тижнях</div>
+                <SessionHistoryChart sessions={sessions}/>
+              </div>
+            )}
+
+            <div style={{fontSize:10,letterSpacing:3,color:"#64748b",textTransform:"uppercase",marginBottom:10}}>Журнал тренувань</div>
+            {Object.keys(sessions).length===0
+              ? <div style={{background:"rgba(255,255,255,.03)",border:"2px dashed rgba(255,255,255,.08)",borderRadius:14,padding:28,textAlign:"center",color:"#64748b",fontSize:13}}>Результатів поки немає.<br/>Запиши перше тренування!</div>
+              : [...Array(12)].map((_,i) => {
+                  const w=i+1, s=sessions[w];
+                  if (!s?.completed) return null;
+                  return (
+                    <div key={w} style={{background:"rgba(74,222,128,.03)",border:"2px solid rgba(74,222,128,.12)",borderRadius:14,padding:14,marginBottom:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                        <span style={{color:"#4ade80",fontSize:13,fontWeight:600}}>Тиждень {w}</span>
+                        <span style={{color:"#64748b",fontSize:11}}>{s.date}</span>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                        {s.staticTime  && <div style={{fontSize:11}}><span style={{color:"#64748b"}}>Статика: </span><span style={{fontWeight:500}}>{s.staticTime}</span></div>}
+                        {s.dynamicDist && <div style={{fontSize:11}}><span style={{color:"#64748b"}}>Динаміка: </span><span style={{fontWeight:500}}>{s.dynamicDist}</span></div>}
+                        {s.avgHR       && <div style={{fontSize:11}}><span style={{color:"#64748b"}}>Avg HR: </span><span style={{fontWeight:500}}>{s.avgHR}</span></div>}
+                        {s.maxHR       && <div style={{fontSize:11}}><span style={{color:"#64748b"}}>Max HR: </span><span style={{fontWeight:500}}>{s.maxHR}</span></div>}
+                      </div>
+                      {s.feeling && <div style={{marginTop:5,fontSize:11,color:"#94a3b8"}}>Самопочуття: {s.feeling}</div>}
+                      {s.notes   && <div style={{marginTop:4,fontSize:11,color:"#94a3b8",fontStyle:"italic"}}>"{s.notes}"</div>}
+                      <div style={{display:"flex",gap:8,marginTop:6}}>
+                        {fitData[w] && <div style={{fontSize:10,color:"#38bdf8"}}>📊 HR avg {fitData[w].stats.avg}/{fitData[w].stats.max}</div>}
+                        {aiCache[w] && <div style={{fontSize:10,color:"#a78bfa"}}>🤖 AI аналіз</div>}
+                      </div>
+                    </div>
+                  );
+                })
+            }
+          </div>
+        )}
+
+        {/* ── INFO ── */}
+        {tab==="info" && (
+          <div style={{padding:"0 16px",animation:"fadeUp .3s ease"}}>
+            <div style={{fontSize:10,letterSpacing:3,color:"#64748b",textTransform:"uppercase",marginBottom:12}}>Техніки і знання</div>
+            {INFO_DATA.map((card,idx) => <InfoCard key={idx} card={card}/>)}
+          </div>
+        )}
+
+        {/* ──
+ RULES ── */}
+        {tab==="rules" && (
+          <div style={{padding:"0 16px",animation:"fadeUp .3s ease"}}>
+            {[
+              {title:"Золоті правила",color:"rgba(56,189,248,.06)",border:"rgba(56,189,248,.2)",tc:"#f0f9ff",items:["💧 500мл води за 30 хв до тренування","❤️ Пульс < 85 перед кожним зануренням","😴 Стрес або поганий сон — знижуй інтенсивність вдвічі","🎯 Не більше 1 максимального зусилля за тренування","👤 Завжди повідомляй когось","🚨 Будь-який дискомфорт — негайно виходь"]},
+              {title:"Серце: пролапс МК 1 ст.",color:"rgba(239,68,68,.05)",border:"rgba(239,68,68,.2)",tc:"#fca5a5",items:["🚩 Серцебиття, біль у грудях — СТОП","⏱ Пульс < 85 перед кожним зануренням","💧 Дегідратація підвищує ризик аритмій","😤 Гіпервентиляція перед пірнанням — ЗАБОРОНЕНА"]},
+              {title:"Правило відпочинку",color:"rgba(251,191,36,.05)",border:"rgba(251,191,36,.2)",tc:"#fbbf24",items:["⏳ Відпочинок = мінімум 3× тривалість","🤿 Пірнав 1 хв → відпочивай 3 хв мінімум","❤️ Заходь у воду тільки при пульсі < 85"]},
+            ].map((s,si) => (
+              <div key={si} style={{marginBottom:16}}>
+                <div style={{fontSize:10,letterSpacing:3,color:"#64748b",textTransform:"uppercase",marginBottom:8}}>{s.title}</div>
+                {s.items.map((item,i) => (
+                  <div key={i} style={{background:s.color,border:`2px solid ${s.border}`,borderRadius:12,padding:"12px 14px",marginBottom:6,fontSize:12,color:s.tc,lineHeight:1.6}}>{item}</div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+
+      {/* ── Edit session modal ── */}
+      {editW && (
+        <div style={{position:"fixed",inset:0,zIndex:100,background:"rgba(0,0,0,.9)",backdropFilter:"blur(8px)",display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={e=>{if(e.target===e.currentTarget)setEditW(null);}}>
+          <div style={{background:"rgba(15,23,42,.98)",borderRadius:"20px 20px 0 0",border:"2px solid rgba(56,189,248,.25)",width:"100%",maxWidth:600,padding:24,maxHeight:"88vh",overflowY:"auto"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+              <div style={{fontSize:18,color:"#f0f9ff",fontWeight:500}}>Тиждень {editW.week} — Результат</div>
+              <button onClick={()=>setEditW(null)} style={{background:"none",border:"none",color:"#64748b",fontSize:20,cursor:"pointer"}}>✕</button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div>
+                <label style={{fontSize:11,color:"#94a3b8",display:"block",marginBottom:4,fontWeight:500}}>Дата</label>
+                <input type="date" value={editW.date||""} onChange={e=>setEditW({...editW,date:e.target.value})}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><label style={{fontSize:11,color:"#94a3b8",display:"block",marginBottom:4,fontWeight:500}}>Статика (хв:сек)</label><input placeholder="2:30" value={editW.staticTime||""} onChange={e=>setEditW({...editW,staticTime:e.target.value})}/></div>
+                <div><label style={{fontSize:11,color:"#94a3b8",display:"block",marginBottom:4,fontWeight:500}}>Динаміка (м)</label><input placeholder="50м" value={editW.dynamicDist||""} onChange={e=>setEditW({...editW,dynamicDist:e.target.value})}/></div>
+                <div><label style={{fontSize:11,color:"#94a3b8",display:"block",marginBottom:4,fontWeight:500}}>Avg HR</label><input placeholder="102" value={editW.avgHR||""} onChange={e=>setEditW({...editW,avgHR:e.target.value})}/></div>
+                <div><label style={{fontSize:11,color:"#94a3b8",display:"block",marginBottom:4,fontWeight:500}}>Max HR</label><input placeholder="123" value={editW.maxHR||""} onChange={e=>setEditW({...editW,maxHR:e.target.value})}/></div>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#94a3b8",display:"block",marginBottom:4,fontWeight:500}}>Самопочуття</label>
+                <div style={{display:"flex",gap:6}}>
+                  {["😫 Важко","😐 Нормально","😊 Добре","🔥 Відмінно"].map(f => (
+                    <button key={f} onClick={()=>setEditW({...editW,feeling:f})} style={{flex:1,padding:"8px 4px",borderRadius:8,fontSize:9,background:editW.feeling===f?"rgba(56,189,248,.2)":"rgba(255,255,255,.04)",border:editW.feeling===f?"2px solid rgba(56,189,248,.5)":"2px solid rgba(255,255,255,.08)",color:editW.feeling===f?"#38bdf8":"#94a3b8",cursor:"pointer",fontWeight:editW.feeling===f?600:400}}>{f}</button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#94a3b8",display:"block",marginBottom:4,fontWeight:500}}>Нотатки</label>
+                <textarea rows={3} placeholder="Що вдалось, щоні..." value={editW.notes||""} onChange={e=>setEditW({...editW,notes:e.target.value})} style={{resize:"none"}}/>
+              </div>
+
+              {/* FIT upload */}
+              <div>
+                <label style={{fontSize:11,color:"#94a3b8",display:"block",marginBottom:4,fontWeight:500}}>📊 FIT файл (Garmin Descend MK2S)</label>
+                <input ref={fileRef} type="file" accept=".fit,.FIT" style={{display:"none"}} onChange={async e=>{const f=e.target.files?.[0]; if(f) await handleFitUpload(f,editW.week);}}/>
+                <button className="wbtn" onClick={()=>fileRef.current?.click()} disabled={fitLoading} style={{width:"100%",padding:10,borderRadius:10,background:"rgba(56,189,248,.08)",border:"2px solid rgba(56,189,248,.25)",color:fitLoading?"#64748b":"#38bdf8",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,fontWeight:500}}>
+                  {fitLoading
+                    ? <><div style={{width:14,height:14,border:"2px solid #38bdf8",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>Парсинг...</>
+                    : fitData[editW.week] ? "✓ FIT завантажено — оновити" : "📁 Завантажити .fit файл"
+                  }
+                </button>
+                {fitData[editW.week] && (
+                  <div style={{marginTop:8,background:"rgba(56,189,248,.05)",borderRadius:10,padding:"10px 12px"}}>
+                    <HRChart pts={fitData[editW.week].pts} color="#38bdf8"/>
+                    <div style={{display:"flex",gap:8,marginTop:6,justifyContent:"center"}}>
+                      {[{l:"Avg",v:fitData[editW.week].stats.avg},{l:"Max",v:fitData[editW.week].stats.max},{l:"Хв",v:fitData[editW.week].stats.dur}].map((s,i)=>(
+                        <div key={i} style={{textAlign:"center"}}><div style={{fontSize:13,color:"#f0f9ff",fontWeight:600}}>{s.v}</div><div style={{fontSize:9,color:"#64748b"}}>{s.l}</div></div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div style={{display:"flex",gap:8,marginTop:16}}>
+              <button onClick={()=>setEditW(null)} style={{flex:1,padding:12,borderRadius:12,background:"rgba(255,255,255,.04)",border:"2px solid rgba(255,255,255,.08)",color:"#94a3b8",cursor:"pointer",fontWeight:500}}>Скасувати</button>
+              <button onClick={()=>saveSession(editW.week,{...editW,completed:true})} style={{flex:2,padding:12,borderRadius:12,background:"linear-gradient(135deg,rgba(14,116,144,.5),rgba(30,58,138,.5))",border:"2px solid rgba(56,189,248,.4)",color:"#38bdf8",fontSize:14,cursor:"pointer",fontWeight:600}}>✓ Зберегти</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+</body>
+</html>
