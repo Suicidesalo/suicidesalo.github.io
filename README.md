@@ -1,1 +1,5 @@
-# suicidesalo.github.io
+# .fit parser; Python 🐍
+# Freediving Tracker - 🇼🇮🇵 => 🔜🔜🔜 🤏🤏🤏
+### Tested with Garmin Descent MK2s; 🤿 Apnea mode 🤿 + Displaying Results in Charts 📊; 
+
+🇺🇦🇺🇦🇺🇦 UA view 🇺🇦🇺🇦🇺🇦
