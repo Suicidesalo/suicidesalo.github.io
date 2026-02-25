@@ -1,0 +1,5 @@
+{
+  "name": "Freediving Tracker AI",
+  "description": "Personal freediving trainer with AI-powered plan adjustments based on well-being and heart rate.",
+  "requestFramePermissions": []
+}
